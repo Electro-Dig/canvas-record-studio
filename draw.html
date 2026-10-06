@@ -82,7 +82,7 @@ const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
 const PENTA = [0, 3, 5, 7, 10];
 const ladder = (base, j) => base + 12 * Math.floor(j / 5) + PENTA[((j % 5) + 5) % 5];
 const LANG_Q = new URLSearchParams(location.search).get('lang');
-const EN = LANG_Q ? LANG_Q === 'en' : !/^zh/i.test(navigator.language || 'zh');
+const EN = LANG_Q === 'en';                                        // Chinese unless ?lang=en (or the language button) asks for English
 const Tx = (zh, en) => (EN ? en : zh);           // pick the text for the language
 const HANDLE = Tx('@电子音乐考古小分队', '@Electro-dig');
 // handwriting: Ma Shan Zheng for Chinese, Caveat (a little larger, it runs small) for English
