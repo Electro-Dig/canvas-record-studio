@@ -2,6 +2,8 @@
 
 @电子音乐考古小分队
 
+**在线试玩：** https://electro-dig.github.io/canvas-record-studio/ （英文版：https://electro-dig.github.io/canvas-record-studio/?lang=en）
+
 这是一个手绘风格的音乐工作台。你在画纸上画一个图案，把它放进轨道，它就会被放到唱片上一起转；图案上的点转过唱针下的红线时就会发出声音。
 
 - **原曲模式：** 播放「节奏的形状」。原曲的每一层都由对应的笔先画在纸上，再送上唱片：四拍、反拍、铺底和弦、Clave、Tresillo、3 对 4、相位、惠特尼和 Drop。
