@@ -649,7 +649,10 @@ function recentNotes(t, span) {
 // ---------- what 小拍 draws on the paper before each layer comes in ----------
 // poly: the layer's first bar as a closed shape; ring: the held chord as a circle; whitney: 16 dots in a column that then spin, dot n turning n times, and realign
 const T_WALK = 0.5, T_DRAW = 1.0 * BAR, T_FLY = 0.4, W_LEAD = 3.2 * BAR, W_DRAW = 2.0;
-const DRAWS = Object.keys(LMAP).filter(id => FIRST[id] < Infinity).map(id => ({ id, at: FIRST[id], lead: LEAD, kind: id === 'pad' ? 'ring' : 'poly', m: LMAP[id][0], rr: LMAP[id][1], label: LMAP[id][2], fr: firstFr(id) }))
+// the drop brings back the drums, hats, clave and bass and adds the clap: every pen draws its own shapes at once, the ink brush doing two
+const DROP_IDS = ['kick', 'hat', 'clave', 'bass', 'clap'];
+const DRAWS = Object.keys(LMAP).filter(id => FIRST[id] < Infinity && id !== 'clap').map(id => ({ id, at: FIRST[id], lead: LEAD, kind: id === 'pad' ? 'ring' : 'poly', m: LMAP[id][0], rr: LMAP[id][1], label: LMAP[id][2], fr: firstFr(id) }))
+  .concat(DROP_IDS.map(id => ({ id, at: HITS[id].find(h => h >= DROP_T - 1e-6), lead: LEAD, kind: 'poly', m: LMAP[id][0], rr: LMAP[id][1], label: LMAP[id][2], fr: barFracs(id, DROP_T / BAR), tipKey: 'drop' })))
   .concat([{ id: 'whitney', at: ORIG.W_T0, lead: W_LEAD, kind: 'whitney', m: 'pencil', label: '惠特尼', fr: [] }]).sort((a, b) => a.at - b.at);
 function nextOrigDrawing(t) {
   if (freeMode) return null;
@@ -678,12 +681,13 @@ function along(V, u) {
 }
 // what 小拍 is doing, written along the bottom of the paper in place of the usual caption
 function paperNote(text) { ctx.fillStyle = '#fbfaf5'; ctx.fillRect(1110, 532, 460, 30); ctx.font = '23px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.fillText(text, PAD.x, 554); }
-function drawLayers(t, g) {               // returns the pen at work: [{ tip, m }]
-  // layers that come in together are drawn one after the other on the same circle, each by its own pen; earlier ones stay on the paper
-  const jobs = [], n = g.items.length, share = T_DRAW / n;
+function drawLayers(t, g) {               // returns the pens at work: [{ tip, m }]
+  // layers that come in together are drawn on the same circle; different pens draw at the same time, a pen with two shapes draws them one after the other, faster
+  const jobs = [], byPen = {};
+  g.items.forEach(d => (byPen[d.m] = byPen[d.m] || []).push(d));
+  const pens = Object.keys(byPen);
   const flying = t >= g.at - T_FLY, v = ease(clamp((t - (g.at - T_FLY)) / T_FLY, 0, 1)), rot = TAU * g.at / BAR;
   const k0 = t - (g.at - LEAD) - T_WALK;
-  let cur = null;
   g.items.forEach((d, q) => {
     const V = paperPath(d), k = 330 + q * 20, onlyFirst = d.kind === 'ring', R0 = PAD.r * paperK(d);
     if (flying) {                         // done: each corner flies to where it sits on the record at its first beat
@@ -693,15 +697,17 @@ function drawLayers(t, g) {               // returns the pen at work: [{ tip, m 
       (onlyFirst ? P.slice(0, 1) : P).forEach((p, j) => mark(d.m, p[0], p[1], k + 10 + j, 0.1, lerp(1, 0.7, v)));
       return;
     }
-    const u = clamp((k0 - q * share) / share, 0, 1);
-    if (u <= 0) { if (!cur && V.length) { cur = d; jobs.push({ tip: V[0], m: d.m }); } return; }
+    const mine = byPen[d.m], share = T_DRAW / mine.length, idx = mine.indexOf(d), u = clamp((k0 - idx * share) / share, 0, 1);
+    if (u <= 0) { if (idx === 0 && V.length) jobs.push({ tip: V[0], m: d.m }); return; }
     if (u >= 1) { if (d.kind === 'ring') washRing(PAD.x, PAD.y, R0, k); else shape(d.m, V, k); (onlyFirst ? V.slice(0, 1) : V).forEach((p, j) => mark(d.m, p[0], p[1], k + 10 + j, 0.1)); return; }
     const a = along(V, u);
     if (a.drawn.length > 1) rc.linearPath(a.drawn, Object.assign({ seed: sd(k) }, d.kind === 'ring' ? { stroke: C.water, strokeWidth: 6, roughness: 2.4 } : STYLE[d.m]));
     (onlyFirst ? V.slice(0, 1) : V.slice(0, a.passed)).forEach((p, j) => mark(d.m, p[0], p[1], k + 10 + j, 0.1));
-    cur = d; jobs.push({ tip: a.tip, m: d.m });
+    jobs.push({ tip: a.tip, m: d.m });
   });
-  if (!flying) paperNote(n > 1 ? `${BUD[g.items[0].m].name}先画${SHORT[g.items[0].id]}，${BUD[g.items[1].m].name}再画${SHORT[g.items[1].id]}` : BUD[g.items[0].m].name + '在画：' + g.items[0].label);
+  const CN = ['', '一', '两', '三', '四', '五'];
+  if (!flying) paperNote(g.items[0].tipKey === 'drop' ? `Drop 前：${CN[pens.length]}支笔一起把形状画回来！`
+    : g.items.length > 1 ? `${CN[pens.length]}支笔一起画：${g.items.map(d => SHORT[d.id]).join(' ＋ ')}` : BUD[g.items[0].m].name + '在画：' + g.items[0].label);
   return jobs;
 }
 function drawWhitney(t, g) {
@@ -738,7 +744,7 @@ for (const id of Object.keys(LMAP)) {
 }
 SPANS.whitney = [[ORIG.W_T0, ORIG.W_END]];
 // cards: each layer where its pen first drew it, and again wherever it comes back after a rest (the drop brings most of them back)
-const TRACK_ITEMS = DRAWS.concat(Object.keys(LMAP).flatMap(id => SPANS[id].slice(1).map(([at]) => ({ id, at, kind: id === 'pad' ? 'ring' : 'poly', m: LMAP[id][0], fr: barFracs(id, Math.floor(at / BAR + 1e-6)), back: true }))))
+const TRACK_ITEMS = DRAWS.concat(Object.keys(LMAP).flatMap(id => SPANS[id].slice(1).map(([at]) => ({ id, at, kind: id === 'pad' ? 'ring' : 'poly', m: LMAP[id][0], fr: barFracs(id, Math.floor(at / BAR + 1e-6)), back: true }))).filter(e => !DRAWS.some(d => d.id === e.id && Math.abs(d.at - e.at) < 1e-6)))
   .sort((a, b) => a.at - b.at);
 const CR = 18, CW = (2 * CR + 6) / TRK.pps;
 function cardBase(cx, cy, pop, stroke, k, solid) { ctx.save(); ctx.translate(cx, cy); ctx.scale(pop, pop); rc.circle(0, 0, CR * 2, { fill: '#fffdf8', fillStyle: 'solid', stroke, strokeWidth: solid ? 2.2 : 1.3, roughness: 0.9, seed: k }); }
@@ -861,14 +867,14 @@ const TIPS = {
   p3:      ['3 对 4', '一边每小节 3 下（三角形），一边 4 下（正方形）。它们只在第一拍重合：复节奏。'],
   phA:     ['相位', '12/8 钟声型，12 格里敲 7 下。右边弹同一句，每小节晚一格，七边形一格格转开（Steve Reich 的做法）。'],
   whitney: ['惠特尼', '第 n 个点 4 小节转 n 圈：里圈慢、外圈快，越来越密，但每 4 小节又全部对齐。'],
-  clap:    ['Drop', '前面是 build-up：滤波慢慢打开、噪声往上冲。对齐的那一拍就是 drop，前面所有的形状一起回来。'],
+  drop:    ['Drop', '前面是 build-up：滤波慢慢打开、噪声往上冲。对齐的那一拍就是 drop，前面所有的形状一起回来。'],
   edit:    ['编辑模式', '只循环你画的 16 小节。画几个拐角就有几个音，点一下音符可以去掉；选好画材和 ×N 再放入轨道。'],
 };
 function tipNow(t) {
   if (freeMode) return TIPS.edit;
   let best = null;
-  for (const d of DRAWS) if (TIPS[d.id] && t >= d.at - d.lead && t < d.at + 6) best = d;
-  return best && TIPS[best.id];
+  for (const d of DRAWS) if (TIPS[d.tipKey || d.id] && t >= d.at - d.lead && t < d.at + 6) best = d;
+  return best && TIPS[best.tipKey || best.id];
 }
 function wrapText(text, maxW) { const lines = []; let line = ''; for (const ch of text) { if (ctx.measureText(line + ch).width > maxW && line) { lines.push(line); line = ''; } line += ch; } if (line) lines.push(line); return lines; }
 let tipShown = null, tipAt = -1e9;
@@ -885,11 +891,6 @@ function drawTip(t) {
   ctx.font = '25px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.crayon; ctx.textAlign = 'left'; ctx.fillText(tip[0], x + 12, y + 36);
   ctx.font = '19px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink;
   lines.forEach((l, i) => ctx.fillText(l, x + 12, y + 64 + i * 25));
-  ctx.restore();
-  // a little arrow from the note to the paper
-  ctx.save(); ctx.globalAlpha = a;
-  rc.curve([[x + w - 4, y + 44], [x + w + 30, y + 30], [x + w + 66, y + 62]], { stroke: C.crayon, strokeWidth: 2.4, roughness: 1, seed: sd(1302) });
-  rc.linearPath([[x + w + 50, y + 60], [x + w + 66, y + 62], [x + w + 62, y + 46]], { stroke: C.crayon, strokeWidth: 2.4, roughness: 0.8, seed: sd(1303) });
   ctx.restore();
 }
 
