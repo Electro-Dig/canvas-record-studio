@@ -21,3 +21,22 @@ python -m http.server 8779
 
 - `draw.html`：工作台
 - `index.html`：最早的 16 秒画风小样
+
+## 导出视频
+
+`draw.html?render` 会打开渲染模式：每一帧由 `renderAt(t)` 按时间画出来，原曲由 `renderAudio()` 离线合成。导出步骤：
+
+1. 先像上面那样启动本地服务。
+2. 在 `tools/` 目录里安装依赖：
+
+   ```bash
+   npm i puppeteer-core
+   ```
+
+3. 运行渲染脚本：
+
+   ```bash
+   node tools/render.mjs
+   ```
+
+渲染脚本会用本机的 Chrome 逐帧截图，再用 ffmpeg 合成 `renders/canvas-record-studio.mp4`（1080p，30fps）。

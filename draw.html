@@ -91,7 +91,7 @@ const SECTIONS = [
   { from: 12, to: 20, name: '相位', cap: '非洲 12/8 钟声型：12 格里敲 7 下，正好是音阶的形状。右边弹同一句，每小节晚一格，七边形一格格转开，和声也跟着变。' },
   { from: 20, to: 28, name: '惠特尼', cap: '第 n 层在 4 小节里响 n 次。层一层层加进来，越来越密，但每 4 小节它们都会在同一拍重合。' },
   { from: 28, to: 36, name: 'Drop', cap: '所有层在同一拍对齐的那一刻，就是 drop。前面所有的形状一起回来。' },
-  { from: 36, to: 38, name: '回到一点', cap: '最后一次对齐，所有声音落在同一个点上。' },
+  { from: 36, to: 38, name: 'Outro', cap: '最后一次对齐，所有声音落在同一个点上。' },
 ];
 const DUR = 38 * BAR;
 const CHORDS = { Am: [57, 60, 64], F: [53, 57, 60], C: [55, 60, 64], G: [55, 59, 62], Dm: [50, 57, 62] };
@@ -324,7 +324,10 @@ const LEAD = 1.6 * BAR, PRE = LEAD, FREE_BARS = 16, DROP_T = 56;
 let freeMode = false;
 const loopEnd = () => (freeMode ? FREE_BARS * BAR : DUR), loopStart = () => (freeMode ? 0 : -PRE), loopBars = () => Math.round(loopEnd() / BAR);
 let playing = false, startAC = 0, pausedAt = -PRE, schedTo = -PRE, timer = null;
-const now = () => (playing ? AC.currentTime - startAC : pausedAt);
+const RENDER = new URLSearchParams(location.search).has('render');
+let vclock = null, vwall = null;                                   // set by the video renderer
+const wallNow = () => (vwall !== null ? vwall : performance.now());
+const now = () => (vclock !== null ? vclock : playing ? AC.currentTime - startAC : pausedAt);
 const fired = [];
 function clipEvents(c, a, b, out) {
   for (let bar = Math.max(c.start, Math.floor(a / BAR)); bar < c.start + c.len && bar * BAR < b; bar++) {
@@ -382,14 +385,14 @@ cv.addEventListener('pointerdown', e => {
   if (inTrack(p)) { trackDown(p); if (dragClip) try { cv.setPointerCapture(e.pointerId); } catch (err) {} return; }
   const b = budAt(p); if (b) { if (b.k === 'eraser') startErase(); else pickMed(b.k); return; }
   if (!inPad(p)) return;
-  drawing = [p]; ptr = p; ptrT = performance.now(); try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+  drawing = [p]; ptr = p; ptrT = wallNow(); try { cv.setPointerCapture(e.pointerId); } catch (err) {}
 });
 cv.addEventListener('pointermove', e => {
   const p = toStage(e);
   if (dragClip) return trackMove(p);
   const over = inPad(p) || drawing;
   cv.style.cursor = over ? 'none' : inTrack(p) || budAt(p) ? 'pointer' : '';   // over the paper the pencil is the cursor
-  if (over) { ptr = p; ptrT = performance.now(); }
+  if (over) { ptr = p; ptrT = wallNow(); }
   if (!drawing) return; const q = drawing[drawing.length - 1]; if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 6) drawing.push(p);
 });
 cv.addEventListener('pointerleave', () => { if (!drawing) ptrT = -1e9; });
@@ -430,12 +433,12 @@ function snapped() {
 const playBtn = document.getElementById('playBtn'), dropBtn = document.getElementById('drop'), modeBtn = document.getElementById('modeBtn');
 document.getElementById('start').addEventListener('click', play);
 playBtn.addEventListener('click', () => (playing ? pause() : play()));
-document.querySelectorAll('[data-med]').forEach(b => b.addEventListener('click', () => { med = b.dataset.med; BUD[med].poke = performance.now(); document.querySelectorAll('[data-med]').forEach(x => x.setAttribute('aria-pressed', x === b)); }));
+document.querySelectorAll('[data-med]').forEach(b => b.addEventListener('click', () => { med = b.dataset.med; BUD[med].poke = wallNow(); document.querySelectorAll('[data-med]').forEach(x => x.setAttribute('aria-pressed', x === b)); }));
 document.querySelectorAll('[data-n]').forEach(b => b.addEventListener('click', () => { mult = +b.dataset.n; document.querySelectorAll('[data-n]').forEach(x => x.setAttribute('aria-pressed', x === b)); }));
 document.getElementById('undo').addEventListener('click', () => { strokes.pop(); if (!strokes.length) offSteps.clear(); });
 // the eraser scrubs the paper for a moment, then the strokes are gone
 let eraseAt = -1e9;
-const startErase = () => { eraseAt = performance.now(); BUD.eraser.poke = eraseAt; };
+const startErase = () => { eraseAt = wallNow(); BUD.eraser.poke = eraseAt; };
 document.getElementById('clearPad').addEventListener('click', startErase);
 modeBtn.addEventListener('click', () => {
   freeMode = !freeMode; modeBtn.textContent = freeMode ? '原曲' : '编辑'; modeBtn.setAttribute('aria-pressed', freeMode);
@@ -445,8 +448,8 @@ modeBtn.addEventListener('click', () => {
 dropBtn.addEventListener('click', () => {
   const hits = snapped(); if (!hits.length) return;
   const t = now(); let start = playing ? Math.ceil((t + 0.05) / BAR) : Math.floor(Math.max(0, t) / BAR); if (start >= loopBars()) start = 0;
-  clips.push({ med: strokes.length ? strokes[strokes.length - 1].med : med, n: mult, hits, start, len: Math.min(8, loopBars() - start), born: performance.now() });
-  strokes = []; offSteps.clear(); BUD[clips[clips.length - 1].med].poke = performance.now();
+  clips.push({ med: strokes.length ? strokes[strokes.length - 1].med : med, n: mult, hits, start, len: Math.min(8, loopBars() - start), born: wallNow() });
+  strokes = []; offSteps.clear(); BUD[clips[clips.length - 1].med].poke = wallNow();
 });
 
 // ---------- drawing helpers ----------
@@ -827,7 +830,7 @@ function drawTrack(t) {
       return;
     }
     const c = p.c, g = c._g; if (g.x1 < L || g.x0 > R) return;
-    card(c.med, c.hits.map(h => ({ f: h.step / STEPS, r: h.r })), g.cx, g.cy, sd(450 + k * 3), 1 + 0.6 * Math.exp(-(performance.now() - c.born) / 150), true);
+    card(c.med, c.hits.map(h => ({ f: h.step / STEPS, r: h.r })), g.cx, g.cy, sd(450 + k * 3), 1 + 0.6 * Math.exp(-(wallNow() - c.born) / 150), true);
     ctx.font = '600 20px Caveat, cursive'; ctx.textAlign = 'left'; const lx = g.cx + CR + 5, lw = ctx.measureText('×' + c.n).width;
     ctx.fillStyle = '#fffdf8'; ctx.fillRect(lx - 3, g.cy - 10, lw + 6, 19); ctx.fillStyle = C.ink; ctx.fillText('×' + c.n, lx, g.cy + 6);
     rc.circle(g.del[0], g.del[1], 14, { fill: '#fffdf8', fillStyle: 'solid', stroke: C.ink, strokeWidth: 1.2, roughness: 0.7, seed: sd(490 + k) });
@@ -872,7 +875,7 @@ const TIPS = {
   phA:     ['相位', '12/8 钟声型，12 格里敲 7 下。右边弹同一句，每小节晚一格，七边形一格格转开（Steve Reich 的做法）。'],
   whitney: ['惠特尼', '第 n 个点 4 小节转 n 圈：里圈慢、外圈快，越来越密，但每 4 小节又全部对齐。'],
   drop:    ['Drop', '前面是 build-up：滤波慢慢打开、噪声往上冲。对齐的那一拍就是 drop，前面所有的形状一起回来。'],
-  end:     ['回到一点', '16 个圈在同一拍重新对齐，所有声音落在一个点上；最后一个和弦把它们收住。'],
+  end:     ['Outro', '收尾：16 个圈在同一拍重新对齐，所有声音落回一个点，最后一个和弦把整首歌收住。'],
   edit:    ['编辑模式', '只循环你画的 16 小节。画几个拐角就有几个音，点一下音符可以去掉；选好画材和 ×N 再放入轨道。'],
 };
 function tipNow(t) {
@@ -885,7 +888,7 @@ function tipNow(t) {
 function wrapText(text, maxW) { const lines = []; let line = ''; for (const ch of text) { if (ctx.measureText(line + ch).width > maxW && line) { lines.push(line); line = ''; } line += ch; } if (line) lines.push(line); return lines; }
 let tipShown = null, tipAt = -1e9;
 function drawTip(t) {
-  const tip = tipNow(t), pn = performance.now();
+  const tip = tipNow(t), pn = wallNow();
   if (tip !== tipShown) { tipShown = tip; tipAt = pn; }
   if (!tip) return;
   const a = clamp((pn - tipAt) / 300, 0, 1), x = 928, y = 168, w = 164;
@@ -901,12 +904,12 @@ function drawTip(t) {
 }
 
 // ---------- one frame ----------
-let lastFrame = performance.now();
+let lastFrame = wallNow();
 function frame() {
-  requestAnimationFrame(frame);
+  if (!RENDER) requestAnimationFrame(frame);
   if (!rc) return;
   const t = clamp(now(), loopStart(), loopEnd()), bar = Math.floor(t / BAR);
-  boil = playing ? Math.floor((t + 10) * 6) % 3 + 1 : Math.floor(performance.now() / 170) % 3 + 1;
+  boil = playing ? Math.floor((t + 10) * 6) % 3 + 1 : Math.floor(wallNow() / 170) % 3 + 1;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   desk(); deskText();
 
@@ -979,12 +982,12 @@ function frame() {
 
   // the paper: your strokes, or 小拍 drawing the original's next layer when the paper is empty
   const all = strokes.concat(drawing ? [{ med, pts: drawing }] : []);
-  const userPen = !!drawing || performance.now() - ptrT < 1500;
+  const userPen = !!drawing || wallNow() - ptrT < 1500;
   const nd = all.length || userPen ? null : nextOrigDrawing(t);
   let jobs = [];
   if (nd && nd.items[0].kind === 'whitney') { const tip = drawWhitney(t, nd.items[0]); if (tip) jobs.push({ k: 'pencil', aim: tip, press: 0.85 }); }
   else if (nd) jobs = drawLayers(t, nd).map(j => ({ k: j.m, aim: j.tip, press: 0.85 }));
-  const er = (performance.now() - eraseAt) / 800;
+  const er = (wallNow() - eraseAt) / 800;
   if (er >= 1 && eraseAt > 0) { strokes = []; offSteps.clear(); eraseAt = -1e9; }
   ctx.save(); if (er >= 0 && er < 1) ctx.globalAlpha = 1 - ease(er);
   for (const [q, s] of all.entries()) if (s.pts.length > 1) rc.linearPath(s.pts, Object.assign({ seed: sd(300 + q) }, STYLE[s.med]));
@@ -999,7 +1002,7 @@ function frame() {
   if (!nd && all.length) paperNote(`${MED[m0].name} ×${mult} · ${snaps.length} 个音 · 点一下音符可去掉`);
   else if (!nd && (userPen || freeMode)) paperNote('角度是时间，越往外越高 · 只在拐角和点按处发声');
   else if (!nd && !freeMode && t >= DROP_T && t < DROP_T + 4) paperNote('Drop：前面的形状全部回来了！');
-  else if (!nd && !freeMode && t >= 72) paperNote('回到一点：所有的圈对齐，最后一个和弦');
+  else if (!nd && !freeMode && t >= 72) paperNote('Outro：所有的圈对齐，最后一个和弦');
 
   const sec = ORIG.SECTIONS.find(x => bar >= x.from && bar < x.to) || ORIG.SECTIONS[ORIG.SECTIONS.length - 1];
   ctx.font = '32px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink; ctx.textAlign = 'left'; ctx.fillText(freeMode ? '编辑模式' : t < 0 ? '准备……' : t >= DROP_T - 2 * BAR && t < DROP_T ? '马上 Drop！' : sec.name, 408, 710);
@@ -1011,7 +1014,7 @@ function frame() {
 
   // the band: every pen hops on each beat, landing on the ruler on the beat, alternately left and right, higher when its own instrument plays;
   // the pen whose medium is needed flies over and draws with its tip (your pen follows your hand; the eraser scrubs when you clear)
-  const pn = performance.now(), dt = Math.min(0.1, (pn - lastFrame) / 1000); lastFrame = pn;
+  const pn = wallNow(), dt = Math.min(0.1, (pn - lastFrame) / 1000); lastFrame = pn;
   const beat = BAR / 4, bt = playing ? t + 10 : pn / 1000, ph = ((bt / beat) % 1 + 1) % 1, side = Math.floor(bt / beat) % 2 ? -1 : 1;
   if (er >= 0 && er < 1) jobs = [{ k: 'eraser', aim: [PAD.x + 110 * Math.sin(er * TAU * 2.5), PAD.y + 50 * Math.sin(er * TAU * 1.3)], press: 1 }];
   else if (userPen && ptr) jobs = [{ k: med, aim: ptr, press: drawing ? 1 : 0 }];
@@ -1045,5 +1048,36 @@ function frame() {
 }
 
 requestAnimationFrame(frame);
+
+if (RENDER) {
+  document.querySelector('.palette').hidden = true; document.getElementById('start').hidden = true;
+  // load every glyph the canvas will write before the first frame, then redraw the cached desk text
+  window.renderReady = async () => {
+    const cjk = [...new Set([...[...document.scripts].map(x => x.textContent).join('')].filter(ch => ch > '\u2000'))].join('');
+    await Promise.all([document.fonts.load('600 40px Caveat', 'Canvas Record Studio 0123456789×DROP!'), document.fonts.load('20px "Ma Shan Zheng"', cjk)]);
+    await document.fonts.ready; TEXT = null; for (const k in DESK) delete DESK[k];
+    return true;
+  };
+  window.renderAt = (t, wallMs, quality = 0.92) => { playing = true; vclock = t; vwall = wallMs; frame(); return cv.toDataURL('image/jpeg', quality); };
+  // the original song, rendered offline from the count-in to the last chord, as a 16-bit stereo WAV in base64
+  window.renderAudio = async () => {
+    const sr = 44100, len = Math.ceil((PRE + DUR + 1.5) * sr), off = new OfflineAudioContext(2, len, sr);
+    let vt = 0;
+    const ctxProxy = new Proxy(off, { get: (o, k) => (k === 'currentTime' ? vt : typeof o[k] === 'function' ? o[k].bind(o) : o[k]) });
+    ORIG.init(ctxProxy); ORIG.seek(-PRE);
+    for (let x = -PRE; x < DUR + 0.3; x += 0.05) { vt = PRE + Math.max(0, x); ORIG.tick(x, PRE); }
+    const buf = await off.startRendering(), n = buf.length, L = buf.getChannelData(0), Rch = buf.getChannelData(1);
+    const out = new DataView(new ArrayBuffer(44 + n * 4)), str = (o, v) => [...v].forEach((c, i) => out.setUint8(o + i, c.charCodeAt(0)));
+    str(0, 'RIFF'); out.setUint32(4, 36 + n * 4, true); str(8, 'WAVE'); str(12, 'fmt '); out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 2, true);
+    out.setUint32(24, sr, true); out.setUint32(28, sr * 4, true); out.setUint16(32, 4, true); out.setUint16(34, 16, true); str(36, 'data'); out.setUint32(40, n * 4, true);
+    let peak = 0; for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(L[i]), Math.abs(Rch[i]));
+    const gain = Math.min(1, 0.93 / (peak || 1));                    // leave a little headroom instead of clipping
+    for (let i = 0; i < n; i++) { out.setInt16(44 + i * 4, clamp(L[i] * gain, -1, 1) * 32767, true); out.setInt16(46 + i * 4, clamp(Rch[i] * gain, -1, 1) * 32767, true); }
+    const bytes = new Uint8Array(out.buffer); let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  };
+  window.renderSpan = { from: -PRE, to: DUR };
+}
 })();
 </script>
