@@ -324,7 +324,7 @@ const LEAD = 1.6 * BAR, PRE = LEAD, FREE_BARS = 16, DROP_T = 56;
 let freeMode = false;
 const loopEnd = () => (freeMode ? FREE_BARS * BAR : DUR), loopStart = () => (freeMode ? 0 : -PRE), loopBars = () => Math.round(loopEnd() / BAR);
 let playing = false, startAC = 0, pausedAt = -PRE, schedTo = -PRE, timer = null;
-const RENDER = new URLSearchParams(location.search).has('render');
+const RENDER = new URLSearchParams(location.search).has('render'), COVER = new URLSearchParams(location.search).has('cover');
 let vclock = null, vwall = null;                                   // set by the video renderer
 const wallNow = () => (vwall !== null ? vwall : performance.now());
 const now = () => (vclock !== null ? vclock : playing ? AC.currentTime - startAC : pausedAt);
@@ -369,7 +369,8 @@ const TRK = { y0: 730, y1: 896, ruler: 752, rows: [774, 814], lane0: 842, laneH:
 // the band of pens stands on a ruler between the record and the paper; whichever medium is needed flies over and draws with its own tip
 // H: from the pen's foot to its working end (the eraser works with its foot)
 const BUDS = [{ k: 'ink', x: 944, H: 164, name: '墨笔' }, { k: 'pencil', x: 978, H: 139, name: '铅笔' }, { k: 'crayon', x: 1013, H: 106, name: '蜡笔' },
-  { k: 'water', x: 1047, H: 138, name: '水彩笔' }, { k: 'eraser', x: 1079, H: 0, name: '橡皮' }], TRAY_Y = 702, BUD_S = 1.1;
+  { k: 'water', x: 1047, H: 138, name: '水彩笔' }, { k: 'eraser', x: 1079, H: 0, name: '橡皮' }], TRAY_Y = 702;
+let BUD_S = 1.1;                                                  // the cover draws the band bigger
 const BUD = Object.fromEntries(BUDS.map(b => [b.k, b]));
 const PEN = Object.fromEntries(BUDS.map(b => [b.k, { e: 0, tx: b.x, ty: TRAY_Y - 150 }]));
 
@@ -906,7 +907,7 @@ function drawTip(t) {
 // ---------- one frame ----------
 let lastFrame = wallNow();
 function frame() {
-  if (!RENDER) requestAnimationFrame(frame);
+  if (!RENDER && !COVER) requestAnimationFrame(frame);
   if (!rc) return;
   const t = clamp(now(), loopStart(), loopEnd()), bar = Math.floor(t / BAR);
   boil = playing ? Math.floor((t + 10) * 6) % 3 + 1 : Math.floor(wallNow() / 170) % 3 + 1;
@@ -1049,7 +1050,7 @@ function frame() {
 
 requestAnimationFrame(frame);
 
-if (RENDER) {
+if (RENDER || COVER) {
   document.querySelector('.palette').hidden = true; document.getElementById('start').hidden = true;
   // load every glyph the canvas will write before the first frame, then redraw the cached desk text
   window.renderReady = async () => {
@@ -1078,6 +1079,59 @@ if (RENDER) {
     return btoa(bin);
   };
   window.renderSpan = { from: -PRE, to: DUR };
+  // a social cover: the record at the drop with every layer on it, the band of pens, and a handwritten title
+  window.renderCover = ({ w, h, title, sub, t = 58.6 }) => {
+    cv.width = w; cv.height = h; boil = 2; playing = true; vclock = t; vwall = 1e5;
+    const land = w > h, o = (k, extra) => Object.assign({ roughness: 1.5, seed: 7000 + k }, extra);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = C.desk; ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i * 34 < h + 40; i++) rc.line(0, 18 + i * 34, w, 24 + i * 34 + (i % 3) * 4, o(i, { stroke: '#e2d5bf', strokeWidth: 1, roughness: 2.5 }));
+    // the record, big
+    const wide = w / h > 1.6, R0 = land ? h * (wide ? 0.42 : 0.37) : w * 0.345;   // 16:9, 4:3 or portrait 3:4
+    const rec = land ? { x: wide ? w * 0.3 : R0 + w * 0.04, y: h * 0.54, R: R0 } : { x: w * 0.42, y: h * 0.725, R: R0 }, k = rec.R / REC.R;
+    ctx.save(); ctx.translate(rec.x, rec.y); ctx.scale(k, k);
+    rc.circle(0, 0, REC.R * 2.08, o(1, { fill: '#2b2b2b', fillStyle: 'solid', stroke: C.ink, roughness: 1 }));
+    rc.circle(0, 0, REC.R * 2, o(2, { fill: '#fbfaf5', fillStyle: 'solid', stroke: C.ink, strokeWidth: 1.5, roughness: 1.2 }));
+    [.93, .83, .73, .63, .53].forEach((r, i) => rc.circle(0, 0, REC.R * r * 2, o(3 + i, { stroke: C.line, strokeWidth: 1, roughness: 1.6 })));
+    drawOrig(t);
+    rc.circle(0, 0, 60, o(9, { fill: C.pal, fillStyle: 'hachure', hachureGap: 5, stroke: C.ink, roughness: 1.2 }));
+    ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(0, 0, 5, 0, TAU); ctx.fill();
+    ctx.restore();
+    // the needle line, with a sound splashing where a shape crosses it
+    rc.line(rec.x, rec.y - 40 * k, rec.x, rec.y - rec.R * 1.02, o(20, { stroke: C.crayon, strokeWidth: 4, roughness: 1.2, strokeLineDash: [16, 12] }));
+    [[0.93, C.kick, 0.25], [0.73, C.crayon, 0.55], [0.83, C.pencil, 0.4]].forEach(([r, col, u], q) => {
+      const y = rec.y - rec.R * r; ctx.save(); ctx.globalAlpha = 1 - u * 0.8;
+      rc.circle(rec.x, y, (20 + 60 * u) * k, o(30 + q, { stroke: col, strokeWidth: 3.4, roughness: 1.3 }));
+      for (let j = 0; j < 6; j++) { const a = j * TAU / 6 + 0.3, r0 = (14 + 34 * u) * k, r1 = r0 + 12 * k; rc.line(rec.x + Math.cos(a) * r0, y + Math.sin(a) * r0, rec.x + Math.cos(a) * r1, y + Math.sin(a) * r1, o(40 + q * 6 + j, { stroke: col, strokeWidth: 2.4, roughness: 0.8 })); }
+      ctx.restore();
+    });
+    // title and signature
+    const tx = land ? w * 0.6 : w * 0.07, lines = title.split('/');
+    let ts = land ? h * 0.15 : w * 0.15;
+    ctx.font = `${Math.round(ts)}px "Ma Shan Zheng", KaiTi, serif`;
+    ts *= Math.min(1, (w - tx - w * 0.04) / Math.max(...lines.map(l => ctx.measureText(l).width)));   // the longest line fits the width
+    const ty = land ? h * 0.22 + ts * 0.8 : w * 0.16 + ts * 0.85;
+    ctx.textAlign = 'left'; ctx.fillStyle = C.ink; ctx.font = `${Math.round(ts)}px "Ma Shan Zheng", KaiTi, serif`;
+    lines.forEach((l, i) => ctx.fillText(l, tx, ty + i * ts * 1.12));
+    const lastW = ctx.measureText(lines[lines.length - 1]).width, uy = ty + (lines.length - 1) * ts * 1.12 + ts * 0.22;
+    rc.line(tx, uy, tx + lastW, uy - 6, o(60, { stroke: C.crayon, strokeWidth: ts * 0.07, roughness: 2 }));
+    ctx.font = `${Math.round(ts * 0.36)}px "Ma Shan Zheng", KaiTi, serif`; ctx.fillStyle = C.ink2;
+    ctx.fillText(sub, tx, uy + ts * 0.62);
+    ctx.font = `600 ${Math.round(ts * 0.34)}px Caveat, cursive`; ctx.fillStyle = C.ink;
+    const sy = land ? h * 0.075 : w * 0.075;
+    ctx.fillText('Canvas Record Studio', land ? w * 0.6 : tx, sy);
+    const cw = ctx.measureText('Canvas Record Studio').width;
+    ctx.font = `${Math.round(ts * 0.2)}px "Ma Shan Zheng", KaiTi, serif`; ctx.fillStyle = C.ink2; ctx.fillText('@电子音乐考古小分队', (land ? w * 0.6 : tx) + cw + 14, sy);
+    // the band, standing on a ruler and mid-hop
+    BUD_S = land ? h / 900 * 1.6 : w / 1080 * 1.5;
+    const by = land ? h * 0.94 : h * 0.965, bx0 = land ? w * 0.66 : w * 0.66, step = land ? w * 0.06 : w * 0.075;
+    rc.rectangle(bx0 - step * 0.7, by, step * 5.4, 18 * BUD_S, o(70, { fill: '#e2c48f', fillStyle: 'hachure', hachureGap: 5, stroke: '#8a8174', strokeWidth: 1.5 }));
+    BUDS.forEach((b, i) => {
+      const hop = [10, 34, 0, 26, 8][i] * BUD_S, th = [-0.12, 0.1, -0.05, 0.14, -0.08][i], H = b.H * BUD_S, x = bx0 + i * step, y = by - hop;
+      drawBud(b, i, 3.3 + i, { ax: x + H * Math.sin(th), ay: y - H * Math.cos(th), th }, i % 2 ? 1 : 0.4, i % 2 ? 1 : -1);
+    });
+    return cv.toDataURL('image/png');
+  };
 }
 })();
 </script>
