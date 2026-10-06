@@ -211,11 +211,11 @@ const SYN = {
     [[2200, 0.28], [1450, 0.16]].forEach(([f, a]) => { const o = AC.createOscillator(), g = AC.createGain(); o.frequency.value = f; env(g, t, a * e.vel, 0.001, 0.07); o.connect(g); g.connect(panner(-0.3, drums)); o.start(t); o.stop(t + 0.1); });
   },
   bass(t, e) {
-    const o = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain();
-    o.type = 'triangle'; o.frequency.value = mtof(e.midi); f.type = 'lowpass'; f.Q.value = 0.7;
-    f.frequency.setValueAtTime(850, t); f.frequency.exponentialRampToValueAtTime(200, t + e.dur);
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.44, t + 0.012); g.gain.setTargetAtTime(0.0001, t + e.dur * 0.7, 0.06);
-    o.connect(f); f.connect(g); g.connect(music); o.start(t); o.stop(t + e.dur + 0.4);
+    const g = AC.createGain(), f = AC.createBiquadFilter(), end = t + e.dur + 0.4;
+    f.type = 'lowpass'; f.Q.value = 0.9; f.frequency.setValueAtTime(1100, t); f.frequency.exponentialRampToValueAtTime(180, t + Math.min(0.25, e.dur));
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.46, t + 0.008); g.gain.setTargetAtTime(0.0001, t + e.dur * 0.65, 0.05);
+    [['triangle', 0.75], ['sawtooth', 0.3], ['sine', 0.5]].forEach(([type, amp]) => { const o = AC.createOscillator(), og = AC.createGain(); o.type = type; o.frequency.value = mtof(e.midi); og.gain.value = amp; o.connect(og); og.connect(f); o.start(t); o.stop(end); });
+    f.connect(g); g.connect(music);
   },
   sub(t, e) { const o = AC.createOscillator(), g = AC.createGain(); o.frequency.value = mtof(e.midi); env(g, t, 0.35, 0.01, e.dur); o.connect(g); g.connect(music); o.start(t); o.stop(t + e.dur + 0.1); },
   pluck(t, e) {
@@ -308,9 +308,12 @@ const SYN = {
   mallet(t, e) { const g = AC.createGain(); env(g, t, 0.19, 0.002, 0.5);
     [[1, 1], [4, 0.18], [10, 0.04]].forEach(([m, a]) => { const o = AC.createOscillator(), og = AC.createGain(); o.frequency.value = mtof(e.midi) * m; og.gain.value = a; if (m > 1) { og.gain.setValueAtTime(a, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.12); } o.connect(og); og.connect(g); o.start(t); o.stop(t + 0.6); });
     g.connect(pan(0.35, master)); g.connect(verb); },
-  bass(t, e) { const o = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain(); o.type = 'triangle'; o.frequency.value = mtof(e.midi); f.type = 'lowpass'; f.Q.value = 0.7;
-    f.frequency.setValueAtTime(800, t); f.frequency.exponentialRampToValueAtTime(200, t + 0.45); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.4, t + 0.012); g.gain.setTargetAtTime(0.0001, t + 0.3, 0.07);
-    o.connect(f); f.connect(g); g.connect(master); o.start(t); o.stop(t + 0.7); },
+  // round but with push: a triangle body, a little filtered saw for the attack, a sine underneath for weight
+  bass(t, e) { const g = AC.createGain(), f = AC.createBiquadFilter(), end = t + 0.7; f.type = 'lowpass'; f.Q.value = 0.9;
+    f.frequency.setValueAtTime(1100, t); f.frequency.exponentialRampToValueAtTime(180, t + 0.25);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.42, t + 0.008); g.gain.setTargetAtTime(0.0001, t + 0.28, 0.06);
+    [['triangle', 0.75], ['sawtooth', 0.3], ['sine', 0.5]].forEach(([type, amp]) => { const o = AC.createOscillator(), og = AC.createGain(); o.type = type; o.frequency.value = mtof(e.midi); og.gain.value = amp; o.connect(og); og.connect(f); o.start(t); o.stop(end); });
+    f.connect(g); g.connect(master); },
 };
 
 // ---------- what you put on the track: { med, n, hits: [{ step, r }], start (bar), len (bars) } ----------
@@ -526,7 +529,6 @@ function deskText() {
   o2.fillStyle = C.ink2; fitText(o2, '@电子音乐考古小分队', s => `${s}px "Ma Shan Zheng", KaiTi, serif`, 20, 190, 30 + tw + 16, 42);
   o2.font = '20px Caveat, cursive'; o2.fillText('33', 303, 705); o2.fillText('45', 357, 705);
   o2.textAlign = 'center'; o2.fillText('1', PAD.x, PAD.y - PAD.r - 6);
-  o2.font = '20px "Ma Shan Zheng", KaiTi, serif'; o2.fillText('角度是时间 · 越往外越高', PAD.x, 552);
   TEXT = off; ctx.drawImage(off, 0, 0);
 }
 // redraw the words once the web fonts have arrived, so they never show in a fallback font
@@ -586,7 +588,8 @@ function drawBud(b, i, t, pose, open, swing) {
 }
 
 // ---------- the original on the record ----------
-const HITS = Object.assign({}, ORIG.HITS, { pad: ORIG.EV.filter(e => e.kind === 'pad' && e.t < ORIG.W_END).map(e => e.t) });
+const HITS = Object.assign({}, ORIG.HITS, { pad: ORIG.EV.filter(e => e.kind === 'pad').map(e => e.t) });
+const padDur = at => (at >= ORIG.W_END ? 4 : BAR);              // the closing chord rings for four seconds
 const LMAP = {
   kick: ['ink', .93, '四拍'], hat: ['pencil', .83, '反拍踩镲'], pad: ['water', .44, '铺底和弦（一圈水彩）'], clave: ['crayon', .73, 'Clave'], bass: ['water', .63, '低音'], clap: ['ink', .53, '拍手'],
   p3: ['crayon', .73, '每小节 3 下'], p4: ['pencil', .83, '每小节 4 下'], phA: ['crayon', .83, '12/8 钟声型'], phB: ['pencil', .68, '同一句，每小节晚一格'],
@@ -603,10 +606,11 @@ function drawOrig(t) {
   const bar = Math.floor(t / BAR);
   ctx.save(); ctx.rotate(TAU * t / BAR);
   for (const [id, [m, rr]] of Object.entries(LMAP)) {
-    const fr = barFracs(id, bar), fb = bar; if (!fr.length) continue;   // a layer is on the record only in the bars it plays, gone the moment it stops
     const lh = lastIn(HITS[id], t), since = lh < 0 ? 9 : t - lh;
+    if (id === 'pad' ? since >= padDur(lh) : false) continue;          // a held chord stays while it rings
+    const fr = barFracs(id, bar), fb = bar; if (id !== 'pad' && !fr.length) continue;   // a layer is on the record only in the bars it plays, gone the moment it stops
     const alpha = 1, grow = clamp((t - spanStart(id, t)) / 0.5, 0, 1), g = lerp(0.6, 1, grow);
-    if (id === 'pad') { const R0 = REC.R * rr * g, pulse = Math.exp(-since / 0.12); washRing(0, 0, R0, 777, alpha * (0.6 + 0.4 * Math.exp(-since / 0.6))); ctx.save(); ctx.globalAlpha = alpha; mark('water', 0, -R0, 790, pulse); ctx.restore(); continue; }
+    if (id === 'pad') { const R0 = REC.R * rr * g, pulse = Math.exp(-since / 0.12); washRing(0, 0, R0, 777, alpha * (0.6 + 0.4 * Math.exp(-since / 0.6)) * (lh >= ORIG.W_END ? 1 - 0.7 * since / padDur(lh) : 1)); ctx.save(); ctx.globalAlpha = alpha; mark('water', 0, -R0, 790, pulse); ctx.restore(); continue; }
     ctx.save(); ctx.globalAlpha = alpha; ctx.scale(g, g);
     const R0 = REC.R * rr, pts = fr.map(f => { const a = -TAU * f; return [Math.sin(a) * R0, -Math.cos(a) * R0]; });
     if (pts.length > 1) shape(m, pts, idSeed(id));
@@ -634,7 +638,7 @@ function drawOrig(t) {
 const NOTE_KINDS = new Set(['kick', 'hat', 'clap', 'clave', 'bass', 'sub', 'pluck', 'bell', 'mallet', 'pad']);
 function origColor(e) { if (e.layer && LMAP[e.layer]) return MED[LMAP[e.layer][0]].color; if (e.ring) return MED[ringMed(e.ring)].color; if (e.kind === 'bass' || e.kind === 'sub' || e.kind === 'pad') return MED.water.color; return MED.ink.color; }
 // where on the needle line a note sounds: its distance from the centre, or null if it isn't drawn on the record
-const origRadius = e => (e.layer && LMAP[e.layer] ? LMAP[e.layer][1] : e.ring ? ringR(e.ring) : e.kind === 'pad' && e.t < ORIG.W_END ? LMAP.pad[1] : null);
+const origRadius = e => (e.layer && LMAP[e.layer] ? LMAP[e.layer][1] : e.ring ? ringR(e.ring) : e.kind === 'pad' ? LMAP.pad[1] : null);
 function recentNotes(t, span) {
   const out = [];
   if (!freeMode) {
@@ -868,10 +872,12 @@ const TIPS = {
   phA:     ['相位', '12/8 钟声型，12 格里敲 7 下。右边弹同一句，每小节晚一格，七边形一格格转开（Steve Reich 的做法）。'],
   whitney: ['惠特尼', '第 n 个点 4 小节转 n 圈：里圈慢、外圈快，越来越密，但每 4 小节又全部对齐。'],
   drop:    ['Drop', '前面是 build-up：滤波慢慢打开、噪声往上冲。对齐的那一拍就是 drop，前面所有的形状一起回来。'],
+  end:     ['回到一点', '16 个圈在同一拍重新对齐，所有声音落在一个点上；最后一个和弦把它们收住。'],
   edit:    ['编辑模式', '只循环你画的 16 小节。画几个拐角就有几个音，点一下音符可以去掉；选好画材和 ×N 再放入轨道。'],
 };
 function tipNow(t) {
   if (freeMode) return TIPS.edit;
+  if (t >= ORIG.W_END) return TIPS.end;
   let best = null;
   for (const d of DRAWS) if (TIPS[d.tipKey || d.id] && t >= d.at - d.lead && t < d.at + 6) best = d;
   return best && TIPS[best.tipKey || best.id];
@@ -989,11 +995,11 @@ function frame() {
   const NP = snaps.map(notePos);
   if (NP.length > 1) { ctx.save(); ctx.globalAlpha = 0.5; rc.polygon(NP, { stroke: MED[m0].color, strokeWidth: 1.4, strokeLineDash: [5, 6], roughness: 1, seed: sd(398) }); ctx.restore(); }
   NP.forEach((p, j) => mark(m0, p[0], p[1], 400 + snaps[j].step, 0.35));
-  if (!nd) { ctx.font = '600 34px Caveat, cursive'; ctx.fillStyle = MED[m0].color; ctx.textAlign = 'left'; ctx.fillText('×' + mult, 1118, 164);
-    ctx.font = '20px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink2; ctx.fillText(snaps.length ? `${MED[m0].name} · ${snaps.length} 个拍位` : `${MED[m0].name} · 在圆里画`, 1158, 162); }
   dropBtn.disabled = !snaps.length;
-  if (!nd && !freeMode && !all.length && t >= DROP_T && t < DROP_T + 4) paperNote('Drop：前面的形状全部回来了！');
-  else if (!nd && (freeMode || all.length)) paperNote('只在拐角和点按处发声 · 点一下音符可去掉');
+  if (!nd && all.length) paperNote(`${MED[m0].name} ×${mult} · ${snaps.length} 个音 · 点一下音符可去掉`);
+  else if (!nd && (userPen || freeMode)) paperNote('角度是时间，越往外越高 · 只在拐角和点按处发声');
+  else if (!nd && !freeMode && t >= DROP_T && t < DROP_T + 4) paperNote('Drop：前面的形状全部回来了！');
+  else if (!nd && !freeMode && t >= 72) paperNote('回到一点：所有的圈对齐，最后一个和弦');
 
   const sec = ORIG.SECTIONS.find(x => bar >= x.from && bar < x.to) || ORIG.SECTIONS[ORIG.SECTIONS.length - 1];
   ctx.font = '32px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink; ctx.textAlign = 'left'; ctx.fillText(freeMode ? '编辑模式' : t < 0 ? '准备……' : t >= DROP_T - 2 * BAR && t < DROP_T ? '马上 Drop！' : sec.name, 408, 710);
