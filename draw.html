@@ -1080,15 +1080,15 @@ if (RENDER || COVER) {
   };
   window.renderSpan = { from: -PRE, to: DUR };
   // a social cover: the record at the drop with every layer on it, the band of pens, and a handwritten title
-  window.renderCover = ({ w, h, title, sub, t = 58.6 }) => {
+  window.renderCover = ({ w, h, title, sub, cn = '画布唱片工作室', t = 58.6 }) => {
     cv.width = w; cv.height = h; boil = 2; playing = true; vclock = t; vwall = 1e5;
     const land = w > h, o = (k, extra) => Object.assign({ roughness: 1.5, seed: 7000 + k }, extra);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = C.desk; ctx.fillRect(0, 0, w, h);
     for (let i = 0; i * 34 < h + 40; i++) rc.line(0, 18 + i * 34, w, 24 + i * 34 + (i % 3) * 4, o(i, { stroke: '#e2d5bf', strokeWidth: 1, roughness: 2.5 }));
     // the record, big
-    const wide = w / h > 1.6, R0 = land ? h * (wide ? 0.42 : 0.37) : w * 0.345;   // 16:9, 4:3 or portrait 3:4
-    const rec = land ? { x: wide ? w * 0.3 : R0 + w * 0.04, y: h * 0.54, R: R0 } : { x: w * 0.42, y: h * 0.725, R: R0 }, k = rec.R / REC.R;
+    const wide = w / h > 1.6, R0 = land ? h * (wide ? 0.42 : 0.37) : w * 0.33;   // 16:9, 4:3 or portrait 3:4
+    const rec = land ? { x: wide ? w * 0.3 : R0 + w * 0.04, y: h * 0.54, R: R0 } : { x: w * 0.42, y: h * 0.75, R: R0 }, k = rec.R / REC.R;
     ctx.save(); ctx.translate(rec.x, rec.y); ctx.scale(k, k);
     rc.circle(0, 0, REC.R * 2.08, o(1, { fill: '#2b2b2b', fillStyle: 'solid', stroke: C.ink, roughness: 1 }));
     rc.circle(0, 0, REC.R * 2, o(2, { fill: '#fbfaf5', fillStyle: 'solid', stroke: C.ink, strokeWidth: 1.5, roughness: 1.2 }));
@@ -1110,18 +1110,17 @@ if (RENDER || COVER) {
     let ts = land ? h * 0.15 : w * 0.15;
     ctx.font = `${Math.round(ts)}px "Ma Shan Zheng", KaiTi, serif`;
     ts *= Math.min(1, (w - tx - w * 0.04) / Math.max(...lines.map(l => ctx.measureText(l).width)));   // the longest line fits the width
-    const ty = land ? h * 0.22 + ts * 0.8 : w * 0.16 + ts * 0.85;
+    const ty = land ? h * 0.24 + ts * 0.8 : w * 0.2 + ts * 0.85;
     ctx.textAlign = 'left'; ctx.fillStyle = C.ink; ctx.font = `${Math.round(ts)}px "Ma Shan Zheng", KaiTi, serif`;
     lines.forEach((l, i) => ctx.fillText(l, tx, ty + i * ts * 1.12));
     const lastW = ctx.measureText(lines[lines.length - 1]).width, uy = ty + (lines.length - 1) * ts * 1.12 + ts * 0.22;
     rc.line(tx, uy, tx + lastW, uy - 6, o(60, { stroke: C.crayon, strokeWidth: ts * 0.07, roughness: 2 }));
     ctx.font = `${Math.round(ts * 0.36)}px "Ma Shan Zheng", KaiTi, serif`; ctx.fillStyle = C.ink2;
     ctx.fillText(sub, tx, uy + ts * 0.62);
-    ctx.font = `600 ${Math.round(ts * 0.34)}px Caveat, cursive`; ctx.fillStyle = C.ink;
-    const sy = land ? h * 0.075 : w * 0.075;
-    ctx.fillText('Canvas Record Studio', land ? w * 0.6 : tx, sy);
-    const cw = ctx.measureText('Canvas Record Studio').width;
-    ctx.font = `${Math.round(ts * 0.2)}px "Ma Shan Zheng", KaiTi, serif`; ctx.fillStyle = C.ink2; ctx.fillText('@电子音乐考古小分队', (land ? w * 0.6 : tx) + cw + 14, sy);
+    // the brand above the title: the English name, then the Chinese name and the account on a quieter second line, both left-aligned with the title
+    const by0 = ty - ts * 1.25;
+    ctx.font = `600 ${Math.round(ts * 0.36)}px Caveat, cursive`; ctx.fillStyle = C.ink; ctx.fillText('Canvas Record Studio', tx, by0 - ts * 0.26);
+    ctx.font = `${Math.round(ts * 0.17)}px "Ma Shan Zheng", KaiTi, serif`; ctx.fillStyle = C.ink2; ctx.fillText(`${cn}　·　@电子音乐考古小分队`, tx + 2, by0);
     // the band, standing on a ruler and mid-hop
     BUD_S = land ? h / 900 * 1.6 : w / 1080 * 1.5;
     const by = land ? h * 0.94 : h * 0.965, bx0 = land ? w * 0.66 : w * 0.66, step = land ? w * 0.06 : w * 0.075;
