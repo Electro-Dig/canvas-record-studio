@@ -1,0 +1,294 @@
+<meta charset="utf-8">
+<title>小拍画节奏</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@400;500&family=Caveat:wght@600&display=swap">
+<style>
+/* Layout: a 16:9 sketchbook stage (the future video frame) with a hand-lettered caption; a slim transport below. Light paper, single theme by choice. */
+:root {
+  --paper: #f3f0e8;
+  --ink: #232323;
+  --ink-2: #5f5a52;
+  --line: #d8d1c3;
+  --kick: #1f1f1f;
+  --hat: #3d5a9e;
+  --clave: #d64545;
+  --bass: #2f9c91;
+  --pal: #f08a5d;
+  --f-hand: "Ma Shan Zheng", "KaiTi", "STKaiti", cursive;
+  --f-latin: "Caveat", "Comic Sans MS", cursive;
+  --f-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  color-scheme: light;
+}
+html, body { height: 100%; }
+body { background: var(--paper); color: var(--ink); font-family: var(--f-body); font-size: 15px; }
+* { box-sizing: border-box; }
+#app { max-width: 1240px; margin: 0 auto; padding: 18px 16px 24px; display: grid; gap: 12px; }
+header { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; }
+h1 { margin: 0; font-family: var(--f-hand); font-weight: 400; font-size: clamp(30px, 4vw, 44px); }
+.note { color: var(--ink-2); font-size: 14px; }
+.stage { position: relative; width: 100%; aspect-ratio: 16 / 9; max-width: 100%; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 0 var(--line), 0 12px 32px -18px rgba(60,50,30,.35); }
+#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#start { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); border: 2px solid var(--ink); background: #fffdf8; color: var(--ink);
+  padding: 12px 26px; border-radius: 999px; font-family: var(--f-hand); font-size: 26px; cursor: pointer; box-shadow: 3px 3px 0 var(--ink); }
+#start:hover { background: #fff3e8; }
+#start:focus-visible, .ctl:focus-visible { outline: 2px solid var(--pal); outline-offset: 3px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.ctl { border: 2px solid var(--ink); background: #fffdf8; border-radius: 999px; padding: 6px 18px; cursor: pointer; font: inherit; box-shadow: 2px 2px 0 var(--ink); }
+.keys { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 14px; color: var(--ink-2); }
+.keys span { display: inline-flex; align-items: center; gap: 6px; }
+.keys i { width: 26px; height: 10px; display: inline-block; border-radius: 2px; }
+</style>
+
+<div id="app">
+  <header>
+    <h1>小拍画节奏</h1>
+    <span class="note">风格小样 · 唱片转一圈是一小节，小拍站在唱针的位置，每到一拍就落一笔</span>
+  </header>
+  <div class="stage">
+    <canvas id="cv" width="1600" height="900" aria-label="一只拿着画笔的小角色在转动的唱片上画出节奏的形状"></canvas>
+    <button id="start">开始（打开声音）</button>
+  </div>
+  <div class="row">
+    <button class="ctl" id="toggle">暂停</button>
+    <div class="keys">
+      <span><i style="background:var(--kick)"></i>底鼓 · 浓墨</span>
+      <span><i style="background:repeating-linear-gradient(90deg,var(--hat) 0 5px,transparent 5px 8px)"></i>踩镲 · 铅笔虚线</span>
+      <span><i style="background:repeating-linear-gradient(135deg,var(--clave) 0 2px,transparent 2px 5px)"></i>Clave · 红蜡笔</span>
+      <span><i style="background:rgba(47,156,145,.35)"></i>低音 · 水彩</span>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+<script>
+(() => {
+const TAU = Math.PI * 2, BAR = 2, STEP = BAR / 16, LOOP = 8 * BAR;
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const rc = window.rough ? rough.canvas(cv) : null, gen = window.rough ? rough.generator() : null;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const C = { paper: css('--paper'), ink: css('--ink'), ink2: css('--ink-2'), line: css('--line'), kick: css('--kick'), hat: css('--hat'), clave: css('--clave'), bass: css('--bass'), pal: css('--pal') };
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, u) => a + (b - a) * u;
+const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+
+// ---------- the loop: 8 bars, one new rhythm every 2 bars ----------
+const LAYERS = {
+  kick:  { steps: [0, 4, 8, 12],    from: 0, r: 0.9,  name: '四拍 · 正方形' },
+  hat:   { steps: [2, 6, 10, 14],   from: 2, r: 0.77, name: '反拍 · 转了 45° 的正方形' },
+  clave: { steps: [0, 3, 6, 10, 12], from: 4, r: 0.64, name: 'Clave · 五边形' },
+  bass:  { steps: [0, 6, 12],       from: 6, r: 0.5,  name: 'Tresillo · 三角形' },
+};
+const ORDER = ['kick', 'hat', 'clave', 'bass'];
+const EV = [];
+for (let b = 0; b < 8; b++) for (const id of ORDER) { const L = LAYERS[id]; if (b < L.from) continue; L.steps.forEach((s, j) => EV.push({ t: b * BAR + s * STEP, id, j, b })); }
+EV.sort((a, b) => a.t - b.t);
+
+// ---------- audio ----------
+let AC = null, master, verb, noise;
+function initAudio() {
+  if (AC) return;
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  const comp = AC.createDynamicsCompressor(); comp.connect(AC.destination);
+  master = AC.createGain(); master.gain.value = 0.8; master.connect(comp);
+  const len = AC.sampleRate * 2, ir = AC.createBuffer(2, len, AC.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3); }
+  verb = AC.createConvolver(); verb.buffer = ir; const vg = AC.createGain(); vg.gain.value = 0.25; verb.connect(vg); vg.connect(master);
+  noise = AC.createBuffer(1, AC.sampleRate, AC.sampleRate); const nd = noise.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+}
+const env = (g, t, p, a, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(p, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); };
+const SYN = {
+  kick(t) { const o = AC.createOscillator(), g = AC.createGain(); o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(48, t + 0.12); env(g, t, 0.9, 0.003, 0.38); o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.45); },
+  hat(t) { const s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain(); s.buffer = noise; f.type = 'highpass'; f.frequency.value = 7500; env(g, t, 0.18, 0.002, 0.05); s.connect(f); f.connect(g); g.connect(master); s.start(t, Math.random() * 0.5); s.stop(t + 0.08); },
+  clave(t) { [[2200, 0.25], [1450, 0.14]].forEach(([fq, a]) => { const o = AC.createOscillator(), g = AC.createGain(); o.frequency.value = fq; env(g, t, a, 0.001, 0.07); o.connect(g); g.connect(master); g.connect(verb); o.start(t); o.stop(t + 0.1); }); },
+  bass(t) { const o = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain(); o.type = 'sawtooth'; o.frequency.value = mtof(33); f.type = 'lowpass'; f.Q.value = 4;
+    f.frequency.setValueAtTime(1300, t); f.frequency.exponentialRampToValueAtTime(200, t + 0.5); env(g, t, 0.3, 0.006, 0.5); o.connect(f); f.connect(g); g.connect(master); o.start(t); o.stop(t + 0.6); },
+  pad(t) { const g = AC.createGain(), f = AC.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1000; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.025, t + 0.4); g.gain.setTargetAtTime(0.0001, t + 1.8, 0.3);
+    [57, 60, 64].forEach(m => [-8, 8].forEach(d => { const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(m - 12); o.detune.value = d; o.connect(f); o.start(t); o.stop(t + 3); })); f.connect(g); g.connect(master); g.connect(verb); },
+};
+let playing = false, startAC = 0, pausedAt = 0, timer = null, nextLoop = 0, cursor = 0;
+const songT = () => (playing ? AC.currentTime - startAC : pausedAt);
+function tick() {
+  const now = songT(), horizon = now + 0.15;
+  // events repeat every LOOP seconds; walk the absolute timeline
+  while (true) {
+    const loopN = Math.floor(cursor / EV.length), e = EV[cursor % EV.length], at = loopN * LOOP + e.t;
+    if (at >= horizon) break;
+    cursor++;
+    if (at < now - 0.03) continue;
+    SYN[e.id](startAC + at);
+    if (e.id === 'kick' && e.j === 0 && e.b >= 2) SYN.pad(startAC + at);
+  }
+}
+function play() {
+  initAudio(); AC.resume();
+  startAC = AC.currentTime - pausedAt; cursor = 0;
+  const loops = Math.floor(pausedAt / LOOP); cursor = loops * EV.length; while (EV[cursor % EV.length].t + Math.floor(cursor / EV.length) * LOOP < pausedAt) cursor++;
+  playing = true; clearInterval(timer); timer = setInterval(tick, 25); tick();
+  document.getElementById('start').hidden = true; toggle.textContent = '暂停';
+}
+function pause() { pausedAt = songT(); playing = false; clearInterval(timer); toggle.textContent = '继续'; }
+const toggle = document.getElementById('toggle');
+toggle.addEventListener('click', () => (playing ? pause() : play()));
+document.getElementById('start').addEventListener('click', play);
+
+// ---------- drawing ----------
+const CX = 800, CY = 500, R = 300;
+// the record turns clockwise; a mark painted at 12 o'clock at time t sits at disc angle -turn(t)
+const turn = t => TAU * (t % LOOP) / BAR;
+let boilSeed = 1;
+const seedFor = (k) => (k * 9301 + boilSeed * 49297) % 233280 + 1;
+const STYLE = {
+  kick:  { stroke: C.kick, strokeWidth: 4.5, roughness: 1.4 },
+  hat:   { stroke: C.hat, strokeWidth: 1.6, roughness: 1.8, strokeLineDash: [9, 7] },
+  clave: { stroke: C.clave, strokeWidth: 3, roughness: 2.2 },
+  bass:  { stroke: C.bass, strokeWidth: 2, roughness: 2.6 },
+};
+function discPt(id, j) { const s = LAYERS[id].steps[j], a = -TAU * s / 16,   // painted at 12 o'clock while the disc turns clockwise
+  r = R * LAYERS[id].r; return [Math.sin(a) * r, -Math.cos(a) * r]; }
+function drawMark(id, j, k, pulse) {
+  const [x, y] = discPt(id, j), sd = seedFor(k);
+  if (id === 'kick') rc.circle(x, y, 26 + 14 * pulse, { fill: C.kick, fillStyle: 'solid', stroke: C.kick, roughness: 1.6, seed: sd });
+  if (id === 'hat') { const d = 9 + 5 * pulse; rc.line(x - d, y - d, x + d, y + d, { stroke: C.hat, strokeWidth: 2.2, seed: sd }); rc.line(x - d, y + d, x + d, y - d, { stroke: C.hat, strokeWidth: 2.2, seed: sd + 1 }); }
+  if (id === 'clave') rc.circle(x, y, 22 + 12 * pulse, { fill: C.clave, fillStyle: 'hachure', hachureGap: 3.5, stroke: C.clave, strokeWidth: 2, roughness: 2, seed: sd });
+  if (id === 'bass') { ctx.save(); ctx.globalAlpha = 0.35; for (let q = 0; q < 3; q++) rc.circle(x + q * 2, y - q, 30 + 16 * pulse - q * 6, { fill: C.bass, fillStyle: 'solid', stroke: 'none', roughness: 3, seed: sd + q }); ctx.restore(); }
+}
+// a stroke from vertex a to b, drawn up to fraction u
+function drawStroke(id, a, b, u, k) {
+  const [x1, y1] = discPt(id, a), [x2, y2] = discPt(id, b);
+  rc.line(x1, y1, lerp(x1, x2, u), lerp(y1, y2, u), Object.assign({ seed: seedFor(k) }, STYLE[id]));
+}
+function washFill(id, k) {
+  const pts = LAYERS[id].steps.map((_, j) => discPt(id, j));
+  if (id === 'clave') rc.polygon(pts, { fill: C.clave, fillStyle: 'hachure', hachureGap: 10, hachureAngle: -30, fillWeight: 1.2, stroke: 'none', roughness: 2, seed: seedFor(k) });
+  if (id === 'bass') { ctx.save(); ctx.globalAlpha = 0.16; for (let q = 0; q < 3; q++) rc.polygon(pts.map(([x, y]) => [x * (1 - q * 0.04), y * (1 - q * 0.04)]), { fill: C.bass, fillStyle: 'solid', stroke: 'none', roughness: 3.5, seed: seedFor(k + q) }); ctx.restore(); }
+}
+
+// scene props: drawn with fixed seeds so they only "boil" a little
+function props() {
+  const key = boilSeed;
+  if (!PROPS[key]) { const off = document.createElement('canvas'); off.width = 1600; off.height = 900; const save = rcProps; rcProps = rough.canvas(off); drawProps(); rcProps = save; PROPS[key] = off; }
+  ctx.drawImage(PROPS[key], 0, 0);
+}
+const PROPS = {}; let rcProps = null;
+function drawProps() {
+  const rc = rcProps;
+  const o = { roughness: 1.6, stroke: '#8a8174', strokeWidth: 1.5, seed: seedFor(500) };
+  // the turntable plinth
+  rc.rectangle(CX - 430, CY - 380, 860, 760, Object.assign({}, o, { fill: '#e6dccb', fillStyle: 'hachure', hachureGap: 14, fillWeight: 0.8 }));
+  // speaker, left
+  rc.rectangle(90, 300, 210, 330, Object.assign({}, o, { fill: '#e2ddd3', fillStyle: 'cross-hatch', hachureGap: 16 }));
+  rc.circle(195, 395, 110, Object.assign({}, o, { fill: '#cfc8bb', fillStyle: 'solid' })); rc.circle(195, 395, 40, o);
+  rc.circle(195, 545, 70, Object.assign({}, o, { fill: '#cfc8bb', fillStyle: 'solid' }));
+  // a plant, right
+  rc.rectangle(1330, 600, 120, 110, Object.assign({}, o, { fill: '#d9a184', fillStyle: 'hachure', hachureGap: 7 }));
+  [[-40, -60, 60, 120, -0.4], [30, -80, 56, 130, 0.3], [-5, -120, 50, 110, 0]].forEach(([dx, dy, w, h], q) =>
+    rc.ellipse(1390 + dx, 600 + dy, w, h, Object.assign({}, o, { fill: '#9fbf9a', fillStyle: 'hachure', hachureGap: 6, seed: seedFor(510 + q) })));
+  // a cassette, lower right
+  rc.rectangle(1290, 770, 210, 120, Object.assign({}, o, { fill: '#f1e3b7', fillStyle: 'solid' }));
+  rc.circle(1350, 828, 34, o); rc.circle(1440, 828, 34, o); rc.rectangle(1320, 795, 150, 22, o);
+  // headphones, upper right
+  rc.arc(1390, 230, 170, 170, Math.PI, TAU, false, Object.assign({}, o, { strokeWidth: 6, stroke: '#6f685e' }));
+  rc.rectangle(1290, 220, 34, 70, Object.assign({}, o, { fill: '#6f685e', fillStyle: 'solid' })); rc.rectangle(1456, 220, 34, 70, Object.assign({}, o, { fill: '#6f685e', fillStyle: 'solid' }));
+}
+
+// 小拍: a round, warm blob holding a long brush; it reaches to the groove of whatever it paints next
+function pal(t, id, hit) {
+  const reach = id ? LAYERS[id].r : 0.9;
+  const bob = Math.sin(TAU * t / (BAR / 4)) * 3;                 // bounces on every beat
+  const squash = 1 - 0.12 * hit;
+  const bx = CX + 120, by = CY - R - 80 + bob, K = 1.45;          // stands on the plinth, just right of 12 o'clock                    // stands on the plinth, just right of 12 o'clock
+  const tipX = CX, tipY = CY - R * reach - 4 + 10 * hit;
+  const sd = seedFor(900);
+  // brush handle from its hand to the tip
+  rc.line(bx - 34 * K, by + 6 * K, tipX, tipY - 26, { stroke: '#8b5a2b', strokeWidth: 5, roughness: 1, seed: sd });
+  rc.ellipse(tipX, tipY - 12, 14, 30, { fill: id ? (id === 'bass' ? C.bass : C[id]) : C.ink, fillStyle: 'solid', stroke: C.ink, strokeWidth: 1.5, roughness: 1.5, seed: sd + 1 });
+  // body, face and feet are drawn at 1.45× around its centre
+  ctx.save(); ctx.translate(bx, by); ctx.scale(K, K); ctx.translate(-bx, -by);
+  rc.ellipse(bx, by, 96, 86 * squash, { fill: C.pal, fillStyle: 'solid', stroke: C.ink, strokeWidth: 2.5, roughness: 1.4, seed: sd + 2 });
+  // feet
+  rc.ellipse(bx - 20, by + 42 * squash, 26, 12, { fill: C.ink, fillStyle: 'solid', stroke: C.ink, seed: sd + 3 });
+  rc.ellipse(bx + 20, by + 42 * squash, 26, 12, { fill: C.ink, fillStyle: 'solid', stroke: C.ink, seed: sd + 4 });
+  // face: eyes blink every ~3 s, a smile that widens on a hit
+  const blink = (t % 3.1) < 0.12;
+  if (blink) { rc.line(bx - 22, by - 6, bx - 10, by - 6, { stroke: C.ink, strokeWidth: 3, seed: sd + 5 }); rc.line(bx + 8, by - 6, bx + 20, by - 6, { stroke: C.ink, strokeWidth: 3, seed: sd + 6 }); }
+  else { ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(bx - 16, by - 6, 5, 0, TAU); ctx.arc(bx + 14, by - 6, 5, 0, TAU); ctx.fill(); }
+  rc.arc(bx - 1, by + 8, 22 + 10 * hit, 14 + 10 * hit, 0.15 * Math.PI, 0.85 * Math.PI, false, { stroke: C.ink, strokeWidth: 2.4, roughness: 1, seed: sd + 7 });
+  ctx.fillStyle = 'rgba(214,69,69,.35)'; ctx.beginPath(); ctx.ellipse(bx - 30, by + 6, 8, 5, 0, 0, TAU); ctx.ellipse(bx + 28, by + 6, 8, 5, 0, 0, TAU); ctx.fill();
+  // arm holding the brush
+  rc.line(bx - 40, by + 2, bx - 30, by + 8, { stroke: C.ink, strokeWidth: 3, seed: sd + 8 });
+  ctx.restore();
+}
+
+// little notes float up from the brush on each hit
+function notes(t) {
+  ctx.save(); ctx.font = '600 34px Caveat, cursive'; ctx.textAlign = 'center';
+  for (let back = 0; back < 10; back++) {
+    const idx = cursorAt(t) - 1 - back; if (idx < 0) break;
+    const e = EVabs(idx), age = t - e.at; if (age > 1.4) break;
+    const u = age / 1.4, sx = CX + 30 + Math.sin(idx * 2.3) * 40 * u + 20 * u;
+    ctx.globalAlpha = 1 - u; ctx.fillStyle = e.id === 'bass' ? C.bass : C[e.id];
+    ctx.fillText(idx % 3 ? '♪' : '♫', sx, CY - R - 20 - 120 * u);
+  }
+  ctx.restore();
+}
+const EVabs = i => { const e = EV[i % EV.length]; return { id: e.id, j: e.j, b: e.b, at: Math.floor(i / EV.length) * LOOP + e.t }; };
+function cursorAt(t) { let lo = 0, hi = Math.floor(t / LOOP + 1) * EV.length; while (lo < hi) { const m = (lo + hi) >> 1; if (EVabs(m).at <= t) lo = m + 1; else hi = m; } return lo; }
+
+function frame() {
+  requestAnimationFrame(frame);
+  if (!rc) return;
+  const t = Math.max(0, songT()), lt = t % LOOP, bar = Math.floor(lt / BAR);
+  boilSeed = Math.floor(t * 6) % 3 + 1;                          // lines redraw on twos: a gentle hand-drawn boil
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = C.paper; ctx.fillRect(0, 0, 1600, 900);
+  props();
+
+  // the paper disc on the platter, with pencil grooves
+  ctx.save(); ctx.translate(CX, CY); ctx.rotate(turn(t));
+  rc.circle(0, 0, R * 2.08, { fill: '#2b2b2b', fillStyle: 'solid', stroke: C.ink, roughness: 1, seed: seedFor(1) });
+  rc.circle(0, 0, R * 2, { fill: '#fbfaf5', fillStyle: 'solid', stroke: C.ink, strokeWidth: 1.5, roughness: 1.2, seed: seedFor(2) });
+  for (const id of ORDER) rc.circle(0, 0, R * 2 * LAYERS[id].r, { stroke: C.line, strokeWidth: 1, roughness: 1.6, seed: seedFor(3 + LAYERS[id].r * 10) });
+  rc.circle(0, 0, 70, { fill: C.pal, fillStyle: 'hachure', hachureGap: 5, stroke: C.ink, roughness: 1.2, seed: seedFor(9) });
+  ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(0, 0, 5, 0, TAU); ctx.fill();
+  // 16 steps, beats longer
+  for (let s = 0; s < 16; s++) { const a = TAU * s / 16, r1 = R * 0.97, r2 = R * (s % 4 ? 0.94 : 0.9); rc.line(Math.sin(a) * r1, -Math.cos(a) * r1, Math.sin(a) * r2, -Math.cos(a) * r2, { stroke: '#9b9284', strokeWidth: s % 4 ? 1 : 2, seed: seedFor(20 + s) }); }
+
+  // everything painted so far in this loop
+  let lastHitId = null, lastHitAge = 9;
+  for (const id of ORDER) {
+    const L = LAYERS[id]; if (bar < L.from) continue;
+    const done = [];
+    L.steps.forEach((s, j) => { const firstT = L.from * BAR + s * STEP; if (lt >= firstT) done.push([j, lt - firstT]); });
+    if (!done.length) continue;
+    const fullBar = lt >= (L.from + 1) * BAR;                      // after one full turn, the shape is closed and filled
+    if (fullBar) washFill(id, 40 + ORDER.indexOf(id));
+    const n = L.steps.length;
+    for (let j = 1; j < n; j++) { const d = done.find(q => q[0] === j); if (d) drawStroke(id, j - 1, j, clamp(d[1] / 0.18, 0, 1), 60 + j + ORDER.indexOf(id) * 10); }
+    if (fullBar) { const closeAge = lt - (L.from + 1) * BAR; drawStroke(id, n - 1, 0, clamp(closeAge / 0.18, 0, 1), 59 + ORDER.indexOf(id) * 10); }
+    // marks pulse whenever the needle passes them again
+    L.steps.forEach((s, j) => {
+      if (!done.find(q => q[0] === j)) return;
+      const since = ((lt - s * STEP) % BAR + BAR) % BAR, pulse = Math.exp(-since / 0.12);
+      drawMark(id, j, 80 + j + ORDER.indexOf(id) * 10, pulse);
+      if (since < lastHitAge) { lastHitAge = since; lastHitId = id; }
+    });
+  }
+  ctx.restore();
+
+  // the next thing 小拍 will paint decides where its brush reaches
+  let nextId = null;
+  { const i = cursorAt(t); if (i < Infinity) nextId = EVabs(i).id; }
+  pal(t, lastHitAge < 0.1 ? lastHitId : nextId, Math.exp(-lastHitAge / 0.08));
+  notes(t);
+
+  // hand-lettered caption: the newest rhythm
+  const cur = ORDER.filter(id => bar >= LAYERS[id].from).pop();
+  ctx.save(); ctx.font = '52px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink; ctx.textAlign = 'left';
+  ctx.fillText(LAYERS[cur].name, 70, 120);
+  ctx.font = '30px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink2; ctx.fillText(`第 ${bar + 1} 小节 · 120 BPM`, 72, 170);
+  ctx.restore();
+}
+requestAnimationFrame(frame);
+})();
+</script>

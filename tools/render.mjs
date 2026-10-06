@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { writeFileSync, mkdirSync } from 'node:fs';
 
 const EN = process.env.LANG_EN === '1', SUFFIX = EN ? '-en' : '';
-const URL = `http://localhost:8779/draw.html?render${EN ? '&lang=en' : ''}`;
+const URL = `http://localhost:8779/draw.html?render&lang=${EN ? 'en' : 'zh'}`;
 const OUT_DIR = 'D:/claude/rhythm-sketch/renders';
 const FPS = Number(process.env.FPS || 30), LIMIT = Number(process.env.LIMIT || 0);
 mkdirSync(OUT_DIR, { recursive: true });

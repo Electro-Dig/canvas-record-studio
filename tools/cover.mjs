@@ -7,7 +7,7 @@ mkdirSync(OUT, { recursive: true });
 const browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true });
 const page = await browser.newPage();
 page.on('pageerror', e => console.error('page error:', e.message));
-await page.goto(`http://localhost:8779/draw.html?cover${process.env.LANG_EN === '1' ? '&lang=en' : ''}`, { waitUntil: 'networkidle0', timeout: 120000 });
+await page.goto(`http://localhost:8779/draw.html?cover&lang=${process.env.LANG_EN === '1' ? 'en' : 'zh'}`, { waitUntil: 'networkidle0', timeout: 120000 });
 await page.waitForFunction(() => window.renderCover && window.rough);
 await page.evaluate((t) => document.fonts.load('120px "Ma Shan Zheng"', t), TITLE + SUB + CN);
 await page.evaluate(() => window.renderReady());

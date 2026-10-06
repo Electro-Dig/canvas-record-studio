@@ -1,5 +1,5 @@
 <meta charset="utf-8">
-<title>Canvas Record Studio · 小拍的唱片工作台</title>
+<title>Canvas Record Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@400;500&family=Caveat:wght@600&display=swap">
@@ -33,6 +33,13 @@ body { background: var(--paper); color: var(--ink); font-family: "Noto Sans SC",
 .pb i { width: .75em; height: .75em; border-radius: 50%; display: inline-block; border: 1.5px solid var(--ink); }
 .pb[aria-pressed="true"] { background: #ffe3d2; transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--ink); }
 .pb.go { background: var(--ink); color: #fffdf8; }
+.pb.free { background: var(--pal); color: #fffdf8; border-color: var(--ink); font-size: 1.12em; padding: .08em .6em; animation: nudge 2.6s ease-in-out infinite; }
+.pb.free[aria-pressed="true"] { background: #fffdf8; color: var(--ink); animation: none; }
+@keyframes nudge { 0%, 70%, 100% { transform: rotate(0); } 76% { transform: rotate(-4deg) scale(1.06); } 84% { transform: rotate(3deg) scale(1.06); } 92% { transform: rotate(0) scale(1.03); } }
+@media (prefers-reduced-motion: reduce) { .pb.free { animation: none; } }
+.pb.lang { font-family: Caveat, var(--f-hand); font-weight: 600; }
+html[lang="en"] .palette { font-size: 1.08cqw; }   /* English labels are longer; a smaller size keeps the tools on two rows */
+html[lang="en"] .pb { font-family: Caveat, var(--f-hand); font-weight: 600; }
 .pb:disabled { opacity: .4; cursor: not-allowed; }
 .pb:focus-visible, #start:focus-visible { outline: 2px solid var(--pal); outline-offset: 2px; }
 </style>
@@ -55,7 +62,8 @@ body { background: var(--paper); color: var(--ink); font-family: "Noto Sans SC",
     <button class="pb go" id="drop" title="放到轨道上：下一小节开始，响 8 小节">放入轨道</button>
     <button class="pb" id="playBtn" aria-label="播放或暂停">▶</button>
     <span class="sep"></span>
-    <button class="pb" id="modeBtn" aria-pressed="false" title="编辑模式：不放原曲，只循环播放你画的（16 小节）">编辑</button>
+    <button class="pb free" id="modeBtn" aria-pressed="false" title="自由创作：不放原曲，只循环播放你画的（16 小节）">✏️ 自由创作</button>
+    <button class="pb lang" id="langBtn" aria-label="Switch language">EN</button>
   </div>
   <button id="start">开始（打开声音）</button>
 </div>
@@ -73,7 +81,8 @@ const ease = u => u * u * (3 - 2 * u);
 const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
 const PENTA = [0, 3, 5, 7, 10];
 const ladder = (base, j) => base + 12 * Math.floor(j / 5) + PENTA[((j % 5) + 5) % 5];
-const EN = new URLSearchParams(location.search).get('lang') === 'en';
+const LANG_Q = new URLSearchParams(location.search).get('lang');
+const EN = LANG_Q ? LANG_Q === 'en' : !/^zh/i.test(navigator.language || 'zh');
 const Tx = (zh, en) => (EN ? en : zh);           // pick the text for the language
 const HANDLE = Tx('@电子音乐考古小分队', '@Electro-dig');
 // handwriting: Ma Shan Zheng for Chinese, Caveat (a little larger, it runs small) for English
@@ -438,6 +447,22 @@ function snapped() {
 
 // ---------- palette ----------
 const playBtn = document.getElementById('playBtn'), dropBtn = document.getElementById('drop'), modeBtn = document.getElementById('modeBtn');
+// the controls speak the page's language; the language button reloads in the other one
+if (EN) {
+  document.documentElement.lang = 'en';
+  const MED_EN = { ink: ['Ink', 'Ink: drums'], pencil: ['Pen', 'Pencil: plucks'], crayon: ['Wax', 'Crayon: mallets'], water: ['Wash', 'Watercolour: bass'] };
+  document.querySelectorAll('[data-med]').forEach(b => { b.lastChild.textContent = MED_EN[b.dataset.med][0]; b.setAttribute('aria-label', MED_EN[b.dataset.med][1]); });
+  document.querySelectorAll('[data-n]').forEach(b => b.setAttribute('aria-label', `${b.dataset.n} times per bar`));
+  document.getElementById('undo').setAttribute('aria-label', 'Undo a stroke');
+  const clr = document.getElementById('clearPad'); clr.textContent = 'Erase'; clr.setAttribute('aria-label', 'Erase the paper');
+  dropBtn.textContent = 'Add to track'; dropBtn.title = 'Put it on the track: starts next bar, plays 8 bars';
+  playBtn.setAttribute('aria-label', 'Play or pause');
+  document.getElementById('start').textContent = 'Start (sound on)';
+  document.querySelector('.palette').setAttribute('aria-label', 'Drawing tools');
+  cv.setAttribute('aria-label', 'Canvas Record Studio: a turntable, a sheet of drawing paper, keys and a band of pens, with a moving track below');
+}
+document.getElementById('langBtn').textContent = EN ? '中文' : 'EN';
+document.getElementById('langBtn').addEventListener('click', () => { const q = new URLSearchParams(location.search); q.set('lang', EN ? 'zh' : 'en'); location.search = q.toString(); });
 document.getElementById('start').addEventListener('click', play);
 playBtn.addEventListener('click', () => (playing ? pause() : play()));
 document.querySelectorAll('[data-med]').forEach(b => b.addEventListener('click', () => { med = b.dataset.med; BUD[med].poke = wallNow(); document.querySelectorAll('[data-med]').forEach(x => x.setAttribute('aria-pressed', x === b)); }));
@@ -447,11 +472,17 @@ document.getElementById('undo').addEventListener('click', () => { strokes.pop();
 let eraseAt = -1e9;
 const startErase = () => { eraseAt = wallNow(); BUD.eraser.poke = eraseAt; };
 document.getElementById('clearPad').addEventListener('click', startErase);
+const modeLabel = () => {
+  modeBtn.textContent = freeMode ? Tx('↩ 回到原曲', '↩ The song') : Tx('✏️ 自由创作', '✏️ Free play');
+  modeBtn.title = freeMode ? Tx('回到原曲：跟着「节奏的形状」一起画', 'Back to the song: draw along with "The Shape of Rhythm"')
+    : Tx('自由创作：不放原曲，只循环播放你画的（16 小节）', 'Free play: no song, just your own drawings looping over 16 bars');
+};
 modeBtn.addEventListener('click', () => {
-  freeMode = !freeMode; modeBtn.textContent = freeMode ? Tx('原曲', 'Song') : Tx('编辑', 'Edit'); modeBtn.setAttribute('aria-pressed', freeMode);
-  modeBtn.title = freeMode ? '回到原曲：跟着「节奏的形状」一起画' : '编辑模式：不放原曲，只循环播放你画的（16 小节）';
+  freeMode = !freeMode; modeLabel(); modeBtn.setAttribute('aria-pressed', freeMode);
+  if (freeMode && !playing) play();                                // free play starts right away, so a first-time visitor hears what they draw
   seekTo(loopStart());
 });
+modeLabel();
 dropBtn.addEventListener('click', () => {
   const hits = snapped(); if (!hits.length) return;
   const t = now(); let start = playing ? Math.ceil((t + 0.05) / BAR) : Math.floor(Math.max(0, t) / BAR); if (start >= loopBars()) start = 0;
@@ -696,7 +727,7 @@ function along(V, u) {
   return { drawn: out, tip: P[P.length - 1], passed: V.length };
 }
 // what 小拍 is doing, written along the bottom of the paper in place of the usual caption
-function paperNote(text) { ctx.fillStyle = '#fbfaf5'; ctx.fillRect(1110, 532, 460, 30); ctx.font = HF(23); ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.fillText(text, PAD.x, 554); }
+function paperNote(text) { ctx.fillStyle = '#fbfaf5'; ctx.fillRect(1110, 532, 460, 30); let px = 23; ctx.font = HF(px); while (ctx.measureText(text).width > 440 && px > 14) ctx.font = HF(--px); ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.fillText(text, PAD.x, 554); }
 function drawLayers(t, g) {               // returns the pens at work: [{ tip, m }]
   // layers that come in together are drawn on the same circle; different pens draw at the same time, a pen with two shapes draws them one after the other, faster
   const jobs = [], byPen = {};
@@ -886,7 +917,7 @@ const TIPS = EN ? {
   whitney: ['Whitney', 'Dot n turns n times every 4 bars: inner dots slow, outer dots fast. It gets dense, yet every 4 bars they all line up again.'],
   drop:    ['Drop', 'The build-up: the filter opens and noise rises. The beat where it all lines up is the drop, and every shape comes back at once.'],
   end:     ['Outro', 'The 16 rings line up on one beat, every sound lands on one point, and a last chord closes the song.'],
-  edit:    ['Edit mode', 'Loops only your 16 bars. Each corner you draw is a note; tap a note to remove it. Pick a medium and ×N, then drop it on the track.'],
+  edit:    ['Free play', 'Loops only your 16 bars. Each corner you draw is a note; tap a note to remove it. Pick a medium and ×N, then drop it on the track.'],
 } : {
   kick:    ['四拍', '底鼓每拍一下。一小节画成一圈，四个点连起来是正方形——几乎所有舞曲的地基。'],
   hat:     ['反拍 ＋ 和弦', '踩镲落在两拍之间：还是正方形，只是转了 45°。水彩圈是每小节换一个的和弦 Am→F→C→G。'],
@@ -897,7 +928,7 @@ const TIPS = EN ? {
   whitney: ['惠特尼', '第 n 个点 4 小节转 n 圈：里圈慢、外圈快，越来越密，但每 4 小节又全部对齐。'],
   drop:    ['Drop', '前面是 build-up：滤波慢慢打开、噪声往上冲。对齐的那一拍就是 drop，前面所有的形状一起回来。'],
   end:     ['Outro', '收尾：16 个圈在同一拍重新对齐，所有声音落回一个点，最后一个和弦把整首歌收住。'],
-  edit:    ['编辑模式', '只循环你画的 16 小节。画几个拐角就有几个音，点一下音符可以去掉；选好画材和 ×N 再放入轨道。'],
+  edit:    ['自由创作', '只循环你画的 16 小节。画几个拐角就有几个音，点一下音符可以去掉；选好画材和 ×N 再放入轨道。'],
 };
 function tipNow(t) {
   if (freeMode) return TIPS.edit;
@@ -1020,13 +1051,13 @@ function frame() {
   if (NP.length > 1) { ctx.save(); ctx.globalAlpha = 0.5; rc.polygon(NP, { stroke: MED[m0].color, strokeWidth: 1.4, strokeLineDash: [5, 6], roughness: 1, seed: sd(398) }); ctx.restore(); }
   NP.forEach((p, j) => mark(m0, p[0], p[1], 400 + snaps[j].step, 0.35));
   dropBtn.disabled = !snaps.length;
-  if (!nd && all.length) paperNote(Tx(`${MED[m0].name} ×${mult} · ${snaps.length} 个音 · 点一下音符可去掉`, `${MED[m0].name} ×${mult} · ${snaps.length} notes · tap a note to remove it`));
-  else if (!nd && (userPen || freeMode)) paperNote(Tx('角度是时间，越往外越高 · 只在拐角和点按处发声', 'angle is time, further out is higher · notes at corners and taps'));
+  if (!nd && all.length) paperNote(Tx(`${MED[m0].name} ×${mult} · ${snaps.length} 个音 · 点一下音符可去掉`, `${MED[m0].name} ×${mult} · ${snaps.length} notes · tap one to remove it`));
+  else if (!nd && (userPen || freeMode)) paperNote(Tx('角度是时间，越往外越高 · 只在拐角和点按处发声', 'angle is time, outward is higher · corners and taps make notes'));
   else if (!nd && !freeMode && t >= DROP_T && t < DROP_T + 4) paperNote(Tx('Drop：前面的形状全部回来了！', 'Drop: every shape is back!'));
   else if (!nd && !freeMode && t >= 72) paperNote(Tx('Outro：所有的圈对齐，最后一个和弦', 'Outro: all rings aligned, one last chord'));
 
   const sec = ORIG.SECTIONS.find(x => bar >= x.from && bar < x.to) || ORIG.SECTIONS[ORIG.SECTIONS.length - 1];
-  ctx.font = HF(32); ctx.fillStyle = C.ink; ctx.textAlign = 'left'; ctx.fillText(freeMode ? Tx('编辑模式', 'Edit mode') : t < 0 ? Tx('准备……', 'Get ready…') : t >= DROP_T - 2 * BAR && t < DROP_T ? Tx('马上 Drop！', 'Drop incoming!') : sec.name, 408, 710);
+  ctx.font = HF(32); ctx.fillStyle = C.ink; ctx.textAlign = 'left'; ctx.fillText(freeMode ? Tx('自由创作', 'Free play') : t < 0 ? Tx('准备……', 'Get ready…') : t >= DROP_T - 2 * BAR && t < DROP_T ? Tx('马上 Drop！', 'Drop incoming!') : sec.name, 408, 710);
   const tt = Math.max(0, t), mm = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
   ctx.font = '600 28px Caveat, cursive'; ctx.fillStyle = C.ink2; ctx.textAlign = 'right'; ctx.fillText(`${mm(tt)} / ${mm(loopEnd())}`, 904, 710);
 

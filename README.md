@@ -20,7 +20,12 @@ python -m http.server 8779
 然后在浏览器里打开 http://localhost:8779/draw.html ，点「开始」打开声音。
 
 - `draw.html`：工作台
-- `index.html`：最早的 16 秒画风小样
+- `index.html`：入口页，会跳转到 `draw.html`
+- `sample.html`：最早的 16 秒画风小样
+
+页面会按浏览器的语言自动选择中文或英文。也可以点右上角的语言按钮切换，或者在网址里加 `?lang=zh`、`?lang=en` 指定。
+
+点「✏️ 自由创作」进入自由模式：不放原曲，只循环播放你自己画的 16 小节。
 
 ## 导出视频
 
