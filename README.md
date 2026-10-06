@@ -40,3 +40,17 @@ python -m http.server 8779
    ```
 
 渲染脚本会用本机的 Chrome 逐帧截图，再用 ffmpeg 合成 `renders/canvas-record-studio.mp4`（1080p，30fps）。
+
+## English version
+
+Add `lang=en` to the URL to get the English workbench, for example `draw.html?lang=en`. All handwriting is switched to English (in the Caveat font) and the account is shown as @Electro-dig.
+
+To export the English video and covers, set `LANG_EN=1` when running the scripts:
+
+```bash
+LANG_EN=1 node tools/render.mjs
+```
+
+```bash
+LANG_EN=1 TITLE="Draw a Song/with Four Pens" SUB="A visual music-making tool" TAG=en node tools/cover.mjs
+```

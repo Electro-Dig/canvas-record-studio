@@ -3,7 +3,8 @@ import puppeteer from 'puppeteer-core';
 import { spawn } from 'node:child_process';
 import { writeFileSync, mkdirSync } from 'node:fs';
 
-const URL = 'http://localhost:8779/draw.html?render';
+const EN = process.env.LANG_EN === '1', SUFFIX = EN ? '-en' : '';
+const URL = `http://localhost:8779/draw.html?render${EN ? '&lang=en' : ''}`;
 const OUT_DIR = 'D:/claude/rhythm-sketch/renders';
 const FPS = Number(process.env.FPS || 30), LIMIT = Number(process.env.LIMIT || 0);
 mkdirSync(OUT_DIR, { recursive: true });
@@ -22,11 +23,11 @@ await page.evaluate(() => window.renderReady());
 const span = await page.evaluate(() => window.renderSpan);
 console.log('rendering audio…');
 const wav = await page.evaluate(() => window.renderAudio());
-const wavPath = `${OUT_DIR}/canvas-record-studio.wav`;
+const wavPath = `${OUT_DIR}/canvas-record-studio${SUFFIX}.wav`;
 writeFileSync(wavPath, Buffer.from(wav, 'base64'));
 
 const total = Math.ceil((span.to - span.from + 1.0) * FPS), frames = LIMIT || total;
-const mp4 = `${OUT_DIR}/canvas-record-studio${LIMIT ? '-test' : ''}.mp4`;
+const mp4 = `${OUT_DIR}/canvas-record-studio${SUFFIX}${LIMIT ? '-test' : ''}.mp4`;
 const ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-', '-i', wavPath,
   '-vf', 'scale=1920:1080:flags=lanczos', '-c:v', 'libx264', '-preset', 'medium', '-crf', '17', '-pix_fmt', 'yuv420p',
   '-c:a', 'aac', '-b:a', '256k', '-shortest', '-movflags', '+faststart', mp4], { stdio: ['pipe', 'inherit', 'inherit'] });

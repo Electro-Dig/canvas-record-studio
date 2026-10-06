@@ -73,6 +73,11 @@ const ease = u => u * u * (3 - 2 * u);
 const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
 const PENTA = [0, 3, 5, 7, 10];
 const ladder = (base, j) => base + 12 * Math.floor(j / 5) + PENTA[((j % 5) + 5) % 5];
+const EN = new URLSearchParams(location.search).get('lang') === 'en';
+const Tx = (zh, en) => (EN ? en : zh);           // pick the text for the language
+const HANDLE = Tx('@电子音乐考古小分队', '@Electro-dig');
+// handwriting: Ma Shan Zheng for Chinese, Caveat (a little larger, it runs small) for English
+const HF = px => (EN ? `600 ${Math.round(px * 1.18)}px Caveat, cursive` : `${px}px "Ma Shan Zheng", KaiTi, serif`);
 
 // ================= 「节奏的形状」, note for note =================
 // The original song's score and synths, unchanged, playing on the workbench's AudioContext.
@@ -276,15 +281,16 @@ const cutoff = t => t < W_T0 ? 16000 : t < 56 ? 500 * Math.pow(16000 / 500, Math
 })();
 
 const DUR = ORIG.DUR, NBARS = Math.round(DUR / BAR);
+if (EN) { const SEC_EN = { '四拍': 'Four on the floor', '反拍': 'Offbeat', '3 对 4': '3 against 4', '相位': 'Phase', '惠特尼': 'Whitney' }; ORIG.SECTIONS.forEach(x => { x.name = SEC_EN[x.name] || x.name; }); }
 
 // ---------- media = instruments for what you draw ----------
 const ROOT = [0, -4, 3, -2];                                     // the original's Am F C G, so a drawn bass follows the chords
 const chordRoot = bar => (bar >= 20 && bar < 36 ? ROOT[(bar - 20) % 4] : bar >= 12 && bar < 20 ? [0, 0, -4, -4, 3, 3, -2, -2][bar - 12] : bar >= 8 && bar < 12 ? (bar % 2 ? -4 : 0) : 0);
 const MED = {
-  ink:    { name: '浓墨', color: C.kick, note: p => (p.r < 0.4 ? { kind: 'kick' } : p.r < 0.7 ? { kind: 'clap' } : { kind: 'hat' }) },
-  pencil: { name: '铅笔', color: C.pencil, note: p => ({ kind: 'pluck', midi: ladder(57, Math.round(p.r * 9)) }) },
-  crayon: { name: '蜡笔', color: C.crayon, note: p => ({ kind: 'mallet', midi: ladder(57, Math.round(p.r * 9)) }) },
-  water:  { name: '水彩', color: C.water, note: (p, bar) => ({ kind: 'bass', midi: ladder(33, Math.round(p.r * 6)) + chordRoot(bar) }) },
+  ink:    { name: Tx('浓墨', 'Ink'), color: C.kick, note: p => (p.r < 0.4 ? { kind: 'kick' } : p.r < 0.7 ? { kind: 'clap' } : { kind: 'hat' }) },
+  pencil: { name: Tx('铅笔', 'Pencil'), color: C.pencil, note: p => ({ kind: 'pluck', midi: ladder(57, Math.round(p.r * 9)) }) },
+  crayon: { name: Tx('蜡笔', 'Crayon'), color: C.crayon, note: p => ({ kind: 'mallet', midi: ladder(57, Math.round(p.r * 9)) }) },
+  water:  { name: Tx('水彩', 'Watercolour'), color: C.water, note: (p, bar) => ({ kind: 'bass', midi: ladder(33, Math.round(p.r * 6)) + chordRoot(bar) }) },
 };
 let AC = null, master, verb, noise;
 function initAudio() {
@@ -368,8 +374,8 @@ const PAD = { x: 1340, y: 342, r: 180 };                           // drawing pa
 const TRK = { y0: 730, y1: 896, ruler: 752, rows: [774, 814], lane0: 842, laneH: 5.4, ph: REC.x, pps: 40 };   // the moving track; its playhead sits under the needle
 // the band of pens stands on a ruler between the record and the paper; whichever medium is needed flies over and draws with its own tip
 // H: from the pen's foot to its working end (the eraser works with its foot)
-const BUDS = [{ k: 'ink', x: 944, H: 164, name: '墨笔' }, { k: 'pencil', x: 978, H: 139, name: '铅笔' }, { k: 'crayon', x: 1013, H: 106, name: '蜡笔' },
-  { k: 'water', x: 1047, H: 138, name: '水彩笔' }, { k: 'eraser', x: 1079, H: 0, name: '橡皮' }], TRAY_Y = 702;
+const BUDS = [{ k: 'ink', x: 944, H: 164, name: Tx('墨笔', 'Ink brush') }, { k: 'pencil', x: 978, H: 139, name: Tx('铅笔', 'Pencil') }, { k: 'crayon', x: 1013, H: 106, name: Tx('蜡笔', 'Crayon') },
+  { k: 'water', x: 1047, H: 138, name: Tx('水彩笔', 'Watercolour brush') }, { k: 'eraser', x: 1079, H: 0, name: Tx('橡皮', 'Eraser') }], TRAY_Y = 702;
 let BUD_S = 1.1;                                                  // the cover draws the band bigger
 const BUD = Object.fromEntries(BUDS.map(b => [b.k, b]));
 const PEN = Object.fromEntries(BUDS.map(b => [b.k, { e: 0, tx: b.x, ty: TRAY_Y - 150 }]));
@@ -442,7 +448,7 @@ let eraseAt = -1e9;
 const startErase = () => { eraseAt = wallNow(); BUD.eraser.poke = eraseAt; };
 document.getElementById('clearPad').addEventListener('click', startErase);
 modeBtn.addEventListener('click', () => {
-  freeMode = !freeMode; modeBtn.textContent = freeMode ? '原曲' : '编辑'; modeBtn.setAttribute('aria-pressed', freeMode);
+  freeMode = !freeMode; modeBtn.textContent = freeMode ? Tx('原曲', 'Song') : Tx('编辑', 'Edit'); modeBtn.setAttribute('aria-pressed', freeMode);
   modeBtn.title = freeMode ? '回到原曲：跟着「节奏的形状」一起画' : '编辑模式：不放原曲，只循环播放你画的（16 小节）';
   seekTo(loopStart());
 });
@@ -530,7 +536,7 @@ function deskText() {
   o2.textAlign = 'left'; o2.fillStyle = C.ink; fitText(o2, 'Canvas Record Studio', s => `600 ${s}px Caveat, cursive`, 46, 350, 30, 44);
   const tw = o2.measureText('Canvas Record Studio').width;
   r.line(30, 53, 30 + tw * 0.42, 51, { stroke: C.pal, strokeWidth: 3, roughness: 1.6, seed: 505 });
-  o2.fillStyle = C.ink2; fitText(o2, '@电子音乐考古小分队', s => `${s}px "Ma Shan Zheng", KaiTi, serif`, 20, 190, 30 + tw + 16, 42);
+  o2.fillStyle = C.ink2; fitText(o2, HANDLE, s => HF(s), 20, 190, 30 + tw + 16, 42);
   o2.font = '20px Caveat, cursive'; o2.fillText('33', 303, 705); o2.fillText('45', 357, 705);
   o2.textAlign = 'center'; o2.fillText('1', PAD.x, PAD.y - PAD.r - 6);
   TEXT = off; ctx.drawImage(off, 0, 0);
@@ -595,8 +601,9 @@ function drawBud(b, i, t, pose, open, swing) {
 const HITS = Object.assign({}, ORIG.HITS, { pad: ORIG.EV.filter(e => e.kind === 'pad').map(e => e.t) });
 const padDur = at => (at >= ORIG.W_END ? 4 : BAR);              // the closing chord rings for four seconds
 const LMAP = {
-  kick: ['ink', .93, '四拍'], hat: ['pencil', .83, '反拍踩镲'], pad: ['water', .44, '铺底和弦（一圈水彩）'], clave: ['crayon', .73, 'Clave'], bass: ['water', .63, '低音'], clap: ['ink', .53, '拍手'],
-  p3: ['crayon', .73, '每小节 3 下'], p4: ['pencil', .83, '每小节 4 下'], phA: ['crayon', .83, '12/8 钟声型'], phB: ['pencil', .68, '同一句，每小节晚一格'],
+  kick: ['ink', .93, Tx('四拍', 'four on the floor')], hat: ['pencil', .83, Tx('反拍踩镲', 'offbeat hats')], pad: ['water', .44, Tx('铺底和弦（一圈水彩）', 'the chord (a watercolour ring)')],
+  clave: ['crayon', .73, 'Clave'], bass: ['water', .63, Tx('低音', 'bass')], clap: ['ink', .53, Tx('拍手', 'claps')],
+  p3: ['crayon', .73, Tx('每小节 3 下', '3 per bar')], p4: ['pencil', .83, Tx('每小节 4 下', '4 per bar')], phA: ['crayon', .83, Tx('12/8 钟声型', '12/8 bell pattern')], phB: ['pencil', .68, Tx('同一句，每小节晚一格', 'the same phrase, a step later')],
 };
 const FIRST = Object.fromEntries(Object.keys(LMAP).map(id => [id, (HITS[id] || [])[0] ?? Infinity]));
 const idSeed = id => [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
@@ -661,7 +668,7 @@ const T_WALK = 0.5, T_DRAW = 1.0 * BAR, T_FLY = 0.4, W_LEAD = 3.2 * BAR, W_DRAW 
 const DROP_IDS = ['kick', 'hat', 'clave', 'bass', 'clap'];
 const DRAWS = Object.keys(LMAP).filter(id => FIRST[id] < Infinity && id !== 'clap').map(id => ({ id, at: FIRST[id], lead: LEAD, kind: id === 'pad' ? 'ring' : 'poly', m: LMAP[id][0], rr: LMAP[id][1], label: LMAP[id][2], fr: firstFr(id) }))
   .concat(DROP_IDS.map(id => ({ id, at: HITS[id].find(h => h >= DROP_T - 1e-6), lead: LEAD, kind: 'poly', m: LMAP[id][0], rr: LMAP[id][1], label: LMAP[id][2], fr: barFracs(id, DROP_T / BAR), tipKey: 'drop' })))
-  .concat([{ id: 'whitney', at: ORIG.W_T0, lead: W_LEAD, kind: 'whitney', m: 'pencil', label: '惠特尼', fr: [] }]).sort((a, b) => a.at - b.at);
+  .concat([{ id: 'whitney', at: ORIG.W_T0, lead: W_LEAD, kind: 'whitney', m: 'pencil', label: Tx('惠特尼', 'Whitney'), fr: [] }]).sort((a, b) => a.at - b.at);
 function nextOrigDrawing(t) {
   if (freeMode) return null;
   let at = Infinity;
@@ -669,7 +676,8 @@ function nextOrigDrawing(t) {
   // layers that come in within the same bar are drawn together (e.g. the hats and the chord at bar 3)
   return at < Infinity ? { at, items: DRAWS.filter(d => Math.floor(d.at / BAR + 1e-6) === Math.floor(at / BAR + 1e-6)) } : null;
 }
-const SHORT = { kick: '四拍', hat: '反拍', pad: '和弦', clave: 'Clave', bass: '低音', clap: '拍手', p3: '3 下', p4: '4 下', phA: '钟声', phB: '晚一格' };
+const SHORT = EN ? { kick: 'four', hat: 'offbeat', pad: 'chord', clave: 'clave', bass: 'bass', clap: 'claps', p3: 'threes', p4: 'fours', phA: 'bell', phB: 'echo' }
+  : { kick: '四拍', hat: '反拍', pad: '和弦', clave: 'Clave', bass: '低音', clap: '拍手', p3: '3 下', p4: '4 下', phA: '钟声', phB: '晚一格' };
 // every layer is drawn on the one circle, at its true angles and on the same ring it will ride on the record, so layers that come in together overlap exactly as they will sound
 const paperK = d => d.rr * 0.84;
 const padPoint = (f, kr) => { const a = TAU * f, d = PAD.r * kr; return [PAD.x + Math.sin(a) * d, PAD.y - Math.cos(a) * d]; };
@@ -688,7 +696,7 @@ function along(V, u) {
   return { drawn: out, tip: P[P.length - 1], passed: V.length };
 }
 // what 小拍 is doing, written along the bottom of the paper in place of the usual caption
-function paperNote(text) { ctx.fillStyle = '#fbfaf5'; ctx.fillRect(1110, 532, 460, 30); ctx.font = '23px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.fillText(text, PAD.x, 554); }
+function paperNote(text) { ctx.fillStyle = '#fbfaf5'; ctx.fillRect(1110, 532, 460, 30); ctx.font = HF(23); ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.fillText(text, PAD.x, 554); }
 function drawLayers(t, g) {               // returns the pens at work: [{ tip, m }]
   // layers that come in together are drawn on the same circle; different pens draw at the same time, a pen with two shapes draws them one after the other, faster
   const jobs = [], byPen = {};
@@ -713,9 +721,10 @@ function drawLayers(t, g) {               // returns the pens at work: [{ tip, m
     (onlyFirst ? V.slice(0, 1) : V.slice(0, a.passed)).forEach((p, j) => mark(d.m, p[0], p[1], k + 10 + j, 0.1));
     jobs.push({ tip: a.tip, m: d.m });
   });
-  const CN = ['', '一', '两', '三', '四', '五'];
-  if (!flying) paperNote(g.items[0].tipKey === 'drop' ? `Drop 前：${CN[pens.length]}支笔一起把形状画回来！`
-    : g.items.length > 1 ? `${CN[pens.length]}支笔一起画：${g.items.map(d => SHORT[d.id]).join(' ＋ ')}` : BUD[g.items[0].m].name + '在画：' + g.items[0].label);
+  const CN = EN ? ['', 'One', 'Two', 'Three', 'Four', 'Five'] : ['', '一', '两', '三', '四', '五'];
+  if (!flying) paperNote(g.items[0].tipKey === 'drop' ? Tx(`Drop 前：${CN[pens.length]}支笔一起把形状画回来！`, `Before the drop: ${CN[pens.length].toLowerCase()} pens draw it all back!`)
+    : g.items.length > 1 ? Tx(`${CN[pens.length]}支笔一起画：${g.items.map(d => SHORT[d.id]).join(' ＋ ')}`, `${CN[pens.length]} pens at once: ${g.items.map(d => SHORT[d.id]).join(' + ')}`)
+    : Tx(BUD[g.items[0].m].name + '在画：' + g.items[0].label, `${BUD[g.items[0].m].name} draws ${g.items[0].label}`));
   return jobs;
 }
 function drawWhitney(t, g) {
@@ -733,10 +742,10 @@ function drawWhitney(t, g) {
     if (!flying && n === shown && u < 1) tip = [x, y];
   }
   if (flying) return null;
-  if (u < 1) paperNote('铅笔在画：16 个点，排成一竖');
-  else if (s < 0.02) paperNote('惠特尼：第 n 个点，4 小节转 n 圈');
-  else if (s < 0.97) { paperNote('里圈慢，外圈快……'); }
-  else paperNote('转完一轮，又全部对齐！');
+  if (u < 1) paperNote(Tx('铅笔在画：16 个点，排成一竖', 'Pencil draws 16 dots in a column'));
+  else if (s < 0.02) paperNote(Tx('惠特尼：第 n 个点，4 小节转 n 圈', 'Whitney: dot n turns n times in 4 bars'));
+  else if (s < 0.97) { paperNote(Tx('里圈慢，外圈快……', 'inner dots slow, outer dots fast…')); }
+  else paperNote(Tx('转完一轮，又全部对齐！', 'one full turn: all lined up again!'));
   if (s > 0 && s < 1) { ctx.font = '600 24px Caveat, cursive'; ctx.fillStyle = C.ink2; ctx.textAlign = 'left'; ctx.fillText('×1', PAD.x + 12, PAD.y - PAD.r * 0.154 + 6); ctx.fillText('×16', PAD.x + PAD.r * 0.97 + 4, PAD.y - PAD.r * 0.2); }
   return tip;
 }
@@ -796,7 +805,7 @@ function drawTrack(t) {
     const x0 = xAt(s.from * BAR, t), x1 = xAt(s.to * BAR, t); if (x1 < L || x0 > R) return;
     ctx.fillStyle = i % 2 ? '#f4eee2' : '#ece3d1'; ctx.fillRect(x0, TRK.y0 + 3, x1 - x0, TRK.ruler - TRK.y0 - 4);
     ctx.fillStyle = i % 2 ? 'rgba(244,238,226,.35)' : 'rgba(236,227,209,.35)'; ctx.fillRect(x0, TRK.ruler, x1 - x0, TRK.y1 - TRK.ruler);
-    ctx.font = '18px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink2; ctx.textAlign = 'left'; ctx.fillText(s.name, Math.max(x0, L) + 6, TRK.y0 + 18);
+    ctx.font = HF(18); ctx.fillStyle = C.ink2; ctx.textAlign = 'left'; ctx.save(); ctx.beginPath(); ctx.rect(x0, TRK.y0, x1 - x0 - 4, TRK.ruler - TRK.y0); ctx.clip(); ctx.fillText(s.name, Math.max(x0, L) + 6, TRK.y0 + 18); ctx.restore();
   });
   else {
     const x0 = xAt(0, t), x1 = xAt(loopEnd(), t);
@@ -804,7 +813,7 @@ function drawTrack(t) {
     ctx.font = '600 18px Caveat, cursive'; ctx.fillStyle = C.ink2; ctx.textAlign = 'left';
     for (let b = 0; b < FREE_BARS; b += 4) ctx.fillText(String(b + 1), xAt(b * BAR, t) + 5, TRK.y0 + 18);
     rc.line(x1, TRK.y0 + 2, x1, TRK.y1 - 2, { stroke: C.ink2, strokeWidth: 2, roughness: 0.8, seed: sd(81) });
-    ctx.font = '18px "Ma Shan Zheng", KaiTi, serif'; ctx.fillText('↺ 回到开头', x1 + 6, TRK.y0 + 18);
+    ctx.font = HF(18); ctx.fillText(Tx('↺ 回到开头', '↺ back to start'), x1 + 6, TRK.y0 + 18);
   }
   ctx.strokeStyle = '#9b9284'; ctx.lineWidth = 1;
   for (let b = 0; b <= loopBars(); b++) { const x = xAt(b * BAR, t); if (x < L || x > R) continue; ctx.beginPath(); ctx.moveTo(x, TRK.ruler - (b % 4 ? 4 : 9)); ctx.lineTo(x, TRK.ruler); ctx.stroke(); }
@@ -867,7 +876,18 @@ function trackMove([x]) {
 }
 
 // ---------- tips: what each musical idea is, on a sticky note pointing at the paper while it's drawn ----------
-const TIPS = {
+const TIPS = EN ? {
+  kick:    ['Four on the floor', 'A kick on every beat. Draw one bar as a circle and the four hits make a square: the floor of almost every dance track.'],
+  hat:     ['Offbeat + chord', 'Hi-hats land between the beats: the same square, turned 45°. The watercolour ring is the chord, a new one each bar: Am, F, C, G.'],
+  clave:   ['3-2 Clave', 'Five hits in sixteen steps, the backbone of Latin music. Five points spread as evenly as they can go: a Euclidean rhythm.'],
+  bass:    ['Tresillo', 'The bass plays 3+3+2: three hits spread evenly over eight steps, the Euclidean rhythm E(3,8). A triangle.'],
+  p3:      ['3 against 4', 'One part plays 3 per bar (a triangle), the other 4 (a square). They only meet on beat one: a polyrhythm.'],
+  phA:     ['Phase', 'A 12/8 bell pattern: 7 hits in 12 steps. The second part plays it one step later each bar, so the heptagon slowly turns apart (Steve Reich style).'],
+  whitney: ['Whitney', 'Dot n turns n times every 4 bars: inner dots slow, outer dots fast. It gets dense, yet every 4 bars they all line up again.'],
+  drop:    ['Drop', 'The build-up: the filter opens and noise rises. The beat where it all lines up is the drop, and every shape comes back at once.'],
+  end:     ['Outro', 'The 16 rings line up on one beat, every sound lands on one point, and a last chord closes the song.'],
+  edit:    ['Edit mode', 'Loops only your 16 bars. Each corner you draw is a note; tap a note to remove it. Pick a medium and ×N, then drop it on the track.'],
+} : {
   kick:    ['四拍', '底鼓每拍一下。一小节画成一圈，四个点连起来是正方形——几乎所有舞曲的地基。'],
   hat:     ['反拍 ＋ 和弦', '踩镲落在两拍之间：还是正方形，只是转了 45°。水彩圈是每小节换一个的和弦 Am→F→C→G。'],
   clave:   ['3-2 Clave', '16 格里敲 5 下，拉丁音乐的骨架。几乎平均地撒开 5 个点，就是一种欧几里得节奏。'],
@@ -886,20 +906,20 @@ function tipNow(t) {
   for (const d of DRAWS) if (TIPS[d.tipKey || d.id] && t >= d.at - d.lead && t < d.at + 6) best = d;
   return best && TIPS[best.tipKey || best.id];
 }
-function wrapText(text, maxW) { const lines = []; let line = ''; for (const ch of text) { if (ctx.measureText(line + ch).width > maxW && line) { lines.push(line); line = ''; } line += ch; } if (line) lines.push(line); return lines; }
+function wrapText(text, maxW) { const lines = []; let line = ''; for (const ch of (EN ? text.split(/(?<= )/) : text)) { if (ctx.measureText(line + ch).width > maxW && line) { lines.push(line); line = ''; } line += ch; } if (line) lines.push(line); return lines; }
 let tipShown = null, tipAt = -1e9;
 function drawTip(t) {
   const tip = tipNow(t), pn = wallNow();
   if (tip !== tipShown) { tipShown = tip; tipAt = pn; }
   if (!tip) return;
   const a = clamp((pn - tipAt) / 300, 0, 1), x = 928, y = 168, w = 164;
-  ctx.font = '19px "Ma Shan Zheng", KaiTi, serif';
+  ctx.font = HF(19);
   const lines = wrapText(tip[1], w - 22), h = 60 + lines.length * 25;
   ctx.save(); ctx.globalAlpha = a; ctx.translate(x + w / 2, y); ctx.rotate(-0.025); ctx.translate(-(x + w / 2), -y);
   rc.rectangle(x, y + 8 * (1 - a), w, h, { fill: '#fff4c2', fillStyle: 'solid', stroke: '#c9b26a', strokeWidth: 1.4, roughness: 1.3, seed: sd(1300) });
   rc.rectangle(x + w / 2 - 24, y - 8, 48, 16, { fill: 'rgba(240,200,120,.6)', fillStyle: 'solid', stroke: 'none', roughness: 1, seed: sd(1301) });
-  ctx.font = '25px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.crayon; ctx.textAlign = 'left'; ctx.fillText(tip[0], x + 12, y + 36);
-  ctx.font = '19px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink;
+  ctx.font = HF(25); ctx.fillStyle = C.crayon; ctx.textAlign = 'left'; ctx.fillText(tip[0], x + 12, y + 36);
+  ctx.font = HF(19); ctx.fillStyle = C.ink;
   lines.forEach((l, i) => ctx.fillText(l, x + 12, y + 64 + i * 25));
   ctx.restore();
 }
@@ -953,7 +973,7 @@ function frame() {
     ctx.restore();
   }
   const hintA = freeMode ? (clips.length ? 0 : 1) : clamp(1 - (t - 12) / 2, 0, 1);
-  if (hintA > 0) { ctx.save(); ctx.globalAlpha = hintA; ctx.font = '22px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.crayon; ctx.textAlign = 'left'; ctx.fillText('↓ 过线就响', REC.x + 24, 50); ctx.restore(); }
+  if (hintA > 0) { ctx.save(); ctx.globalAlpha = hintA; ctx.font = HF(22); ctx.fillStyle = C.crayon; ctx.textAlign = 'left'; ctx.fillText(Tx('↓ 过线就响', '↓ cross the line, hear the sound'), REC.x + 24, 50); ctx.restore(); }
   if (!freeMode && t >= DROP_T - BAR && t < DROP_T) {               // the last bar before the drop counts down 4 3 2 1
     const k = Math.floor((t - (DROP_T - BAR)) / (BAR / 4)), u = ((t - (DROP_T - BAR)) % (BAR / 4)) / (BAR / 4);
     ctx.save(); ctx.globalAlpha = 1 - 0.7 * u; ctx.font = `600 ${Math.round(150 - 40 * u)}px Caveat, cursive`; ctx.fillStyle = C.crayon; ctx.textAlign = 'center'; ctx.fillText(String(4 - k), REC.x, REC.y + 50); ctx.restore();
@@ -1000,13 +1020,13 @@ function frame() {
   if (NP.length > 1) { ctx.save(); ctx.globalAlpha = 0.5; rc.polygon(NP, { stroke: MED[m0].color, strokeWidth: 1.4, strokeLineDash: [5, 6], roughness: 1, seed: sd(398) }); ctx.restore(); }
   NP.forEach((p, j) => mark(m0, p[0], p[1], 400 + snaps[j].step, 0.35));
   dropBtn.disabled = !snaps.length;
-  if (!nd && all.length) paperNote(`${MED[m0].name} ×${mult} · ${snaps.length} 个音 · 点一下音符可去掉`);
-  else if (!nd && (userPen || freeMode)) paperNote('角度是时间，越往外越高 · 只在拐角和点按处发声');
-  else if (!nd && !freeMode && t >= DROP_T && t < DROP_T + 4) paperNote('Drop：前面的形状全部回来了！');
-  else if (!nd && !freeMode && t >= 72) paperNote('Outro：所有的圈对齐，最后一个和弦');
+  if (!nd && all.length) paperNote(Tx(`${MED[m0].name} ×${mult} · ${snaps.length} 个音 · 点一下音符可去掉`, `${MED[m0].name} ×${mult} · ${snaps.length} notes · tap a note to remove it`));
+  else if (!nd && (userPen || freeMode)) paperNote(Tx('角度是时间，越往外越高 · 只在拐角和点按处发声', 'angle is time, further out is higher · notes at corners and taps'));
+  else if (!nd && !freeMode && t >= DROP_T && t < DROP_T + 4) paperNote(Tx('Drop：前面的形状全部回来了！', 'Drop: every shape is back!'));
+  else if (!nd && !freeMode && t >= 72) paperNote(Tx('Outro：所有的圈对齐，最后一个和弦', 'Outro: all rings aligned, one last chord'));
 
   const sec = ORIG.SECTIONS.find(x => bar >= x.from && bar < x.to) || ORIG.SECTIONS[ORIG.SECTIONS.length - 1];
-  ctx.font = '32px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink; ctx.textAlign = 'left'; ctx.fillText(freeMode ? '编辑模式' : t < 0 ? '准备……' : t >= DROP_T - 2 * BAR && t < DROP_T ? '马上 Drop！' : sec.name, 408, 710);
+  ctx.font = HF(32); ctx.fillStyle = C.ink; ctx.textAlign = 'left'; ctx.fillText(freeMode ? Tx('编辑模式', 'Edit mode') : t < 0 ? Tx('准备……', 'Get ready…') : t >= DROP_T - 2 * BAR && t < DROP_T ? Tx('马上 Drop！', 'Drop incoming!') : sec.name, 408, 710);
   const tt = Math.max(0, t), mm = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
   ctx.font = '600 28px Caveat, cursive'; ctx.fillStyle = C.ink2; ctx.textAlign = 'right'; ctx.fillText(`${mm(tt)} / ${mm(loopEnd())}`, 904, 710);
 
@@ -1055,7 +1075,7 @@ if (RENDER || COVER) {
   // load every glyph the canvas will write before the first frame, then redraw the cached desk text
   window.renderReady = async () => {
     const cjk = [...new Set([...[...document.scripts].map(x => x.textContent).join('')].filter(ch => ch > '\u2000'))].join('');
-    await Promise.all([document.fonts.load('600 40px Caveat', 'Canvas Record Studio 0123456789×DROP!'), document.fonts.load('20px "Ma Shan Zheng"', cjk)]);
+    await Promise.all([document.fonts.load('600 40px Caveat', 'Canvas Record Studio 0123456789×DROP! abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ…↓↺·+:,.()-'), document.fonts.load('20px "Ma Shan Zheng"', cjk)]);
     await document.fonts.ready; TEXT = null; for (const k in DESK) delete DESK[k];
     return true;
   };
@@ -1080,7 +1100,7 @@ if (RENDER || COVER) {
   };
   window.renderSpan = { from: -PRE, to: DUR };
   // a social cover: the record at the drop with every layer on it, the band of pens, and a handwritten title
-  window.renderCover = ({ w, h, title, sub, cn = '画布唱片工作室', t = 58.6 }) => {
+  window.renderCover = ({ w, h, title, sub, cn = Tx('画布唱片工作室', ''), t = 58.6 }) => {
     cv.width = w; cv.height = h; boil = 2; playing = true; vclock = t; vwall = 1e5;
     const land = w > h, o = (k, extra) => Object.assign({ roughness: 1.5, seed: 7000 + k }, extra);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1108,19 +1128,19 @@ if (RENDER || COVER) {
     // title and signature
     const tx = land ? w * 0.6 : w * 0.07, lines = title.split('/');
     let ts = land ? h * 0.15 : w * 0.15;
-    ctx.font = `${Math.round(ts)}px "Ma Shan Zheng", KaiTi, serif`;
+    ctx.font = HF(Math.round(ts));
     ts *= Math.min(1, (w - tx - w * 0.04) / Math.max(...lines.map(l => ctx.measureText(l).width)));   // the longest line fits the width
     const ty = land ? h * 0.24 + ts * 0.8 : w * 0.2 + ts * 0.85;
-    ctx.textAlign = 'left'; ctx.fillStyle = C.ink; ctx.font = `${Math.round(ts)}px "Ma Shan Zheng", KaiTi, serif`;
+    ctx.textAlign = 'left'; ctx.fillStyle = C.ink; ctx.font = HF(Math.round(ts));
     lines.forEach((l, i) => ctx.fillText(l, tx, ty + i * ts * 1.12));
     const lastW = ctx.measureText(lines[lines.length - 1]).width, uy = ty + (lines.length - 1) * ts * 1.12 + ts * 0.22;
     rc.line(tx, uy, tx + lastW, uy - 6, o(60, { stroke: C.crayon, strokeWidth: ts * 0.07, roughness: 2 }));
-    ctx.font = `${Math.round(ts * 0.36)}px "Ma Shan Zheng", KaiTi, serif`; ctx.fillStyle = C.ink2;
+    ctx.font = HF(Math.round(ts * 0.36)); ctx.fillStyle = C.ink2;
     ctx.fillText(sub, tx, uy + ts * 0.62);
     // the brand above the title: the English name, then the Chinese name and the account on a quieter second line, both left-aligned with the title
     const by0 = ty - ts * 1.25;
     ctx.font = `600 ${Math.round(ts * 0.36)}px Caveat, cursive`; ctx.fillStyle = C.ink; ctx.fillText('Canvas Record Studio', tx, by0 - ts * 0.26);
-    ctx.font = `${Math.round(ts * 0.17)}px "Ma Shan Zheng", KaiTi, serif`; ctx.fillStyle = C.ink2; ctx.fillText(`${cn}　·　@电子音乐考古小分队`, tx + 2, by0);
+    ctx.font = HF(Math.round(ts * (cn ? 0.17 : 0.2))); ctx.fillStyle = C.ink2; ctx.fillText(cn ? `${cn}　·　${HANDLE}` : HANDLE, tx + 2, by0);
     // the band, standing on a ruler and mid-hop
     BUD_S = land ? h / 900 * 1.6 : w / 1080 * 1.5;
     const by = land ? h * 0.94 : h * 0.965, bx0 = land ? w * 0.66 : w * 0.66, step = land ? w * 0.06 : w * 0.075;
