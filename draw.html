@@ -1,0 +1,947 @@
+<meta charset="utf-8">
+<title>Canvas Record Studio · 小拍的唱片工作台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@400;500&family=Caveat:wght@600&display=swap">
+<style>
+/* Layout: everything lives in one 16:9 frame (desk, tools, the moving track), letterboxed to fit the window. Light paper, single theme by choice. */
+:root {
+  --paper: #f3f0e8;
+  --ink: #232323;
+  --line: #d8d1c3;
+  --kick: #1f1f1f;
+  --pencil: #3d5a9e;
+  --crayon: #d64545;
+  --water: #2f9c91;
+  --pal: #f08a5d;
+  --f-hand: "Ma Shan Zheng", "KaiTi", "STKaiti", cursive;
+  color-scheme: light;
+}
+html, body { height: 100%; margin: 0; }
+body { background: var(--paper); color: var(--ink); font-family: "Noto Sans SC", system-ui, sans-serif; display: grid; place-items: center; overflow: hidden; }
+* { box-sizing: border-box; }
+.stage { position: relative; width: min(calc(100vw - 24px), calc((100dvh - 24px) * 16 / 9)); aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; touch-action: none;
+  container-type: inline-size; box-shadow: 0 18px 40px -26px rgba(60,50,30,.5); }
+#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#start { position: absolute; left: 36.25%; top: 41.3%; transform: translate(-50%, -50%); border: 2px solid var(--ink); background: #fffdf8; color: var(--ink);
+  padding: .4em 1.1em; border-radius: 999px; font-family: var(--f-hand); font-size: 2cqw; cursor: pointer; box-shadow: 3px 3px 0 var(--ink); z-index: 3; }
+.palette { position: absolute; left: 68.75%; right: 1%; top: 1.4%; display: flex; flex-wrap: wrap; gap: .3em; align-items: center; z-index: 2; font-size: 1.2cqw; }
+.palette .sep { width: 1px; height: 1.4em; background: var(--line); margin: 0 .1em; }
+.palette .br { flex-basis: 100%; height: 0; }
+.pb { border: 2px solid var(--ink); background: #fffdf8; border-radius: .5em; padding: .05em .45em; cursor: pointer; font-family: var(--f-hand); font-size: 1em; line-height: 1.3;
+  display: inline-flex; gap: .3em; align-items: center; box-shadow: 2px 2px 0 var(--ink); color: var(--ink); }
+.pb i { width: .75em; height: .75em; border-radius: 50%; display: inline-block; border: 1.5px solid var(--ink); }
+.pb[aria-pressed="true"] { background: #ffe3d2; transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--ink); }
+.pb.go { background: var(--ink); color: #fffdf8; }
+.pb:disabled { opacity: .4; cursor: not-allowed; }
+.pb:focus-visible, #start:focus-visible { outline: 2px solid var(--pal); outline-offset: 2px; }
+</style>
+
+<div class="stage" id="stage">
+  <canvas id="cv" width="1600" height="900" aria-label="Canvas Record Studio：唱机、画纸、琴键、一排会跳舞的笔，下方是跟着音乐移动的轨道"></canvas>
+  <div class="palette" role="toolbar" aria-label="画画工具">
+    <button class="pb" data-med="ink" aria-pressed="true" aria-label="浓墨：鼓组"><i style="background:var(--kick)"></i>墨</button>
+    <button class="pb" data-med="pencil" aria-pressed="false" aria-label="铅笔：拨弦"><i style="background:var(--pencil)"></i>铅</button>
+    <button class="pb" data-med="crayon" aria-pressed="false" aria-label="蜡笔：木琴"><i style="background:var(--crayon)"></i>蜡</button>
+    <button class="pb" data-med="water" aria-pressed="false" aria-label="水彩：低音"><i style="background:var(--water)"></i>彩</button>
+    <span class="sep"></span>
+    <button class="pb" data-n="1" aria-pressed="true" aria-label="每小节一遍">×1</button>
+    <button class="pb" data-n="2" aria-pressed="false" aria-label="每小节两遍">×2</button>
+    <button class="pb" data-n="3" aria-pressed="false" aria-label="每小节三遍">×3</button>
+    <button class="pb" data-n="4" aria-pressed="false" aria-label="每小节四遍">×4</button>
+    <span class="br"></span>
+    <button class="pb" id="undo" aria-label="撤销一笔">↶</button>
+    <button class="pb" id="clearPad" aria-label="擦掉画纸">擦</button>
+    <button class="pb go" id="drop" title="放到轨道上：下一小节开始，响 8 小节">放入轨道</button>
+    <button class="pb" id="playBtn" aria-label="播放或暂停">▶</button>
+    <span class="sep"></span>
+    <button class="pb" id="modeBtn" aria-pressed="false" title="编辑模式：不放原曲，只循环播放你画的（16 小节）">编辑</button>
+  </div>
+  <button id="start">开始（打开声音）</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+<script>
+(() => {
+const TAU = Math.PI * 2, BAR = 2, STEPS = 16;
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const rc = window.rough ? rough.canvas(cv) : null;
+const C = { desk: '#efe6d6', ink: '#232323', ink2: '#5f5a52', line: '#d8d1c3', kick: '#1f1f1f', pencil: '#3d5a9e', crayon: '#d64545', water: '#2f9c91', pal: '#f08a5d' };
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, u) => a + (b - a) * u;
+const ease = u => u * u * (3 - 2 * u);
+const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+const PENTA = [0, 3, 5, 7, 10];
+const ladder = (base, j) => base + 12 * Math.floor(j / 5) + PENTA[((j % 5) + 5) % 5];
+
+// ================= 「节奏的形状」, note for note =================
+// The original song's score and synths, unchanged, playing on the workbench's AudioContext.
+const ORIG = (() => {
+  const TAU = Math.PI * 2, BAR = 2, STEP = BAR / 16, STEP12 = BAR / 12;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerp = (a, b, u) => a + (b - a) * u;
+  const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+// ---------------- the song: 38 bars at 120 BPM ----------------
+const SECTIONS = [
+  { from: 0, to: 2, name: '四拍', cap: '先听最熟悉的：底鼓每拍一下。把一小节画成一圈，四个鼓点连起来，是一个正方形。' },
+  { from: 2, to: 4, name: '反拍', cap: '踩镲落在两拍之间。还是正方形，只是转了 45°。House 的律动，就是两个错开的正方形。' },
+  { from: 4, to: 6, name: 'Clave', cap: '3-2 Clave，拉丁音乐的骨架：一个不规则的五边形。' },
+  { from: 6, to: 8, name: 'Tresillo', cap: '低音弹 3-3-2：一个三角形。很多流行和雷鬼顿的低音都是这个形状。' },
+  { from: 8, to: 12, name: '3 对 4', cap: '三角形叠在正方形上：一边每小节 3 下，一边 4 下。它们只在第一拍重合。' },
+  { from: 12, to: 20, name: '相位', cap: '非洲 12/8 钟声型：12 格里敲 7 下，正好是音阶的形状。右边弹同一句，每小节晚一格，七边形一格格转开，和声也跟着变。' },
+  { from: 20, to: 28, name: '惠特尼', cap: '第 n 层在 4 小节里响 n 次。层一层层加进来，越来越密，但每 4 小节它们都会在同一拍重合。' },
+  { from: 28, to: 36, name: 'Drop', cap: '所有层在同一拍对齐的那一刻，就是 drop。前面所有的形状一起回来。' },
+  { from: 36, to: 38, name: '回到一点', cap: '最后一次对齐，所有声音落在同一个点上。' },
+];
+const DUR = 38 * BAR;
+const CHORDS = { Am: [57, 60, 64], F: [53, 57, 60], C: [55, 60, 64], G: [55, 59, 62], Dm: [50, 57, 62] };
+const PROG = ['Am', 'F', 'C', 'G'];
+function chordAt(bar) {
+  if (bar < 8) return 'Am';
+  if (bar < 12) return bar % 2 ? 'F' : 'Am';
+  if (bar < 20) return ['Am', 'Am', 'F', 'F', 'C', 'C', 'G', 'G'][bar - 12];
+  if (bar < 36) return PROG[(bar - 20) % 4];
+  return 'Am';
+}
+
+const EV = [], HITS = {};
+const ev = (t, kind, o = {}) => { EV.push(Object.assign({ t, kind }, o)); if (o.layer) (HITS[o.layer] = HITS[o.layer] || []).push(t); };
+const at = (bar, step) => bar * BAR + step * STEP;
+
+// the 12/8 bell: 7 strokes in 12, the same spacing as a 7-note scale
+const BELL = [0, 2, 4, 5, 7, 9, 11];
+const MOTIF = [69, 72, 74, 76, 79, 76, 74];             // A C D E G E D — pentatonic, so every overlap is consonant
+
+for (let b = 0; b < 38; b++) {
+  const ch = chordAt(b), tones = CHORDS[ch];
+  if (b < 8 || (b >= 20 && b < 27) || (b >= 28 && b < 36)) for (const s of [0, 4, 8, 12]) ev(at(b, s), 'kick', { layer: 'kick', vel: b >= 20 && b < 27 ? lerp(0.55, 0.85, (b - 20) / 7) : 0.9 });
+  else if (b >= 8 && b < 20) ev(at(b, 0), 'kick', { layer: 'kick', vel: 0.55 });
+  else if (b === 36) ev(at(b, 0), 'kick', { layer: 'kick', vel: 1 });
+  if ((b >= 2 && b < 8) || (b >= 28 && b < 36)) for (const s of [2, 6, 10, 14]) ev(at(b, s), 'hat', { layer: 'hat', vel: 0.8 });
+  if (b >= 24 && b < 28) for (let s = 0; s < 16; s++) if (s % 4 !== 2) ev(at(b, s), 'hat', { vel: lerp(0.15, 0.5, (b - 24 + s / 16) / 4) });
+  if (b >= 28 && b < 36) for (let s = 1; s < 16; s += 2) ev(at(b, s), 'hat', { vel: 0.18 });
+  if ((b >= 4 && b < 8) || (b >= 28 && b < 36)) for (const s of [0, 3, 6, 10, 12]) ev(at(b, s), 'clave', { layer: 'clave', vel: 0.8 });
+  if (b >= 6 && b < 8) for (const s of [0, 6, 12]) ev(at(b, s), 'bass', { layer: 'bass', midi: tones[0] - 24, dur: 0.55 });
+  if (b >= 28 && b < 36) { ev(at(b, 0), 'sub', { midi: tones[0] - 24, dur: 0.4 }); for (const s of [2, 6, 10, 14]) ev(at(b, s), 'bass', { layer: 'bass', midi: tones[0] - 12, dur: 0.22 }); }
+  if (b >= 28 && b < 36) for (const s of [4, 12]) ev(at(b, s), 'clap', { layer: 'clap', vel: 0.85 });
+  if (b >= 2 && b < 36) ev(at(b, 0), 'pad', { midis: tones, dur: BAR * 1.02, vel: b < 8 ? 0.45 : b < 20 ? 0.55 : b < 28 ? 0.7 : 0.85 });
+  if (b >= 8 && b < 12) {
+    const top = [tones[2] + 12, tones[1] + 12, tones[0] + 12];
+    for (let k = 0; k < 3; k++) ev(b * BAR + k * BAR / 3, 'pluck', { layer: 'p3', midi: top[k], vel: 0.9, pan: -0.45 });
+    for (let k = 0; k < 4; k++) ev(b * BAR + k * BAR / 4, 'bell', { layer: 'p4', midi: k % 2 ? tones[2] : tones[0], vel: 0.8, pan: 0.45 });
+  }
+  // phase: left voice keeps the bell; right voice plays it one twelfth later each bar
+  if (b >= 12 && b < 20) {
+    const shift = b - 12;
+    BELL.forEach((s, j) => ev(b * BAR + s * STEP12, 'mallet', { layer: 'phA', midi: MOTIF[j], vel: 0.85, pan: -0.55 }));
+    BELL.forEach((s, j) => ev(b * BAR + ((s + shift) % 12) * STEP12, 'mallet', { layer: 'phB', midi: MOTIF[j] - 12, vel: 0.75, pan: 0.55 }));
+    for (let s = 0; s < 12; s++) ev(b * BAR + s * STEP12, 'shaker', { vel: s % 3 === 0 ? 0.5 : 0.25 });
+    ev(at(b, 0), 'bass', { midi: tones[0] - 24, dur: 1.4 });
+  }
+}
+ev(48, 'riser', { dur: 8 });
+for (let s = 0; s < 16; s += 2) ev(at(26, s), 'clap', { vel: lerp(0.25, 0.5, s / 16) });
+for (let s = 0; s < 16; s++) ev(at(27, s), 'clap', { vel: lerp(0.4, 0.9, s / 16) });
+ev(56, 'impact', { shock: true });
+ev(72, 'pad', { midis: [45, 57, 60, 64, 69], dur: 4, vel: 1 });
+ev(72, 'impact', { soft: true, shock: true });
+
+// Whitney: ring n sounds n times per 4-bar phrase; rings enter one per second from 40 s
+const RINGS = 16, W_T0 = 40, PHRASE_LEN = 4 * BAR, W_END = 72;
+const ringEnter = n => W_T0 + (n - 1) * 1.0;
+const RING_HITS = Array.from({ length: RINGS + 1 }, () => []);
+for (let n = 1; n <= RINGS; n++) {
+  for (let ps = W_T0; ps <= W_END; ps += PHRASE_LEN) for (let k = 0; k < n; k++) {
+    const t = ps + k * PHRASE_LEN / n;
+    if (t < ringEnter(n) - 1e-6 || t > W_END + 1e-6) continue;
+    if (t >= W_END - 1e-6 && k > 0) continue;
+    const bar = Math.floor(t / BAR), tones = CHORDS[chordAt(bar)];
+    const idx = n - 1, midi = tones[idx % 3] + 12 * Math.floor((idx % 9) / 3) + 12;
+    ev(t, 'bell', { ring: n, midi, vel: (t >= 56 ? 0.45 : 0.75) / Math.sqrt(1 + idx * 0.25), pan: ((n % 5) - 2) * 0.25 });
+    RING_HITS[n].push(t);
+  }
+}
+const SHOCKS = EV.filter(e => e.shock).map(e => e.t);
+EV.sort((a, b) => a.t - b.t);
+Object.values(HITS).forEach(a => a.sort((x, y) => x - y));
+
+// ---------------- audio ----------------
+let AC = null, master, drums, music, lp, duck, verb, noise;
+function initAudio(shared) {
+  if (master) return;
+  AC = shared;
+  const comp = AC.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 3; comp.attack.value = 0.005; comp.release.value = 0.2;
+  master = AC.createGain(); master.gain.value = 0.85; master.connect(comp); comp.connect(AC.destination);
+  drums = AC.createGain(); drums.connect(master);
+  duck = AC.createGain(); duck.connect(master);
+  lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 16000; lp.Q.value = 0.7; lp.connect(duck);
+  music = AC.createGain(); music.connect(lp);
+  const len = AC.sampleRate * 2.6, ir = AC.createBuffer(2, len, AC.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
+  verb = AC.createConvolver(); verb.buffer = ir; const vg = AC.createGain(); vg.gain.value = 0.32; verb.connect(vg); vg.connect(lp);
+  noise = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate); const nd = noise.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+}
+const env = (g, t, peak, a, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); };
+function noiseSrc(t, dur) { const s = AC.createBufferSource(); s.buffer = noise; s.start(t, Math.random()); s.stop(t + dur); return s; }
+function panner(p, dest) { const n = AC.createStereoPanner(); n.pan.value = p; n.connect(dest); return n; }
+
+const SYN = {
+  kick(t, e) {
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(46, t + 0.13);
+    env(g, t, 0.95 * e.vel, 0.003, 0.42); o.connect(g); g.connect(drums); o.start(t); o.stop(t + 0.5);
+    if (e.t >= 56 - 0.01 && e.t < 72) { duck.gain.cancelScheduledValues(t); duck.gain.setValueAtTime(0.32, t); duck.gain.linearRampToValueAtTime(1, t + 0.24); }
+  },
+  hat(t, e) {
+    const s = noiseSrc(t, 0.08), hp = AC.createBiquadFilter(), g = AC.createGain();
+    hp.type = 'highpass'; hp.frequency.value = 7500; env(g, t, 0.22 * e.vel, 0.002, 0.045);
+    s.connect(hp); hp.connect(g); g.connect(panner(0.25, drums));
+  },
+  shaker(t, e) {
+    const s = noiseSrc(t, 0.12), bp = AC.createBiquadFilter(), g = AC.createGain();
+    bp.type = 'bandpass'; bp.frequency.value = 6000; bp.Q.value = 1.2; env(g, t, 0.09 * e.vel, 0.01, 0.07);
+    s.connect(bp); bp.connect(g); g.connect(panner(-0.15, drums));
+  },
+  clap(t, e) {
+    const s = noiseSrc(t, 0.25), bp = AC.createBiquadFilter(), g = AC.createGain();
+    bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 0.9; env(g, t, 0.5 * e.vel, 0.003, 0.17);
+    s.connect(bp); bp.connect(g); g.connect(drums); g.connect(verb);
+  },
+  clave(t, e) {
+    [[2200, 0.28], [1450, 0.16]].forEach(([f, a]) => { const o = AC.createOscillator(), g = AC.createGain(); o.frequency.value = f; env(g, t, a * e.vel, 0.001, 0.07); o.connect(g); g.connect(panner(-0.3, drums)); o.start(t); o.stop(t + 0.1); });
+  },
+  bass(t, e) {
+    const o = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain();
+    o.type = 'sawtooth'; o.frequency.value = mtof(e.midi); f.type = 'lowpass'; f.Q.value = 4;
+    f.frequency.setValueAtTime(1400, t); f.frequency.exponentialRampToValueAtTime(220, t + e.dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.32, t + 0.006); g.gain.setTargetAtTime(0.0001, t + e.dur * 0.7, 0.06);
+    o.connect(f); f.connect(g); g.connect(music); o.start(t); o.stop(t + e.dur + 0.4);
+  },
+  sub(t, e) { const o = AC.createOscillator(), g = AC.createGain(); o.frequency.value = mtof(e.midi); env(g, t, 0.35, 0.01, e.dur); o.connect(g); g.connect(music); o.start(t); o.stop(t + e.dur + 0.1); },
+  pluck(t, e) {
+    const g = AC.createGain(), f = AC.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 2;
+    f.frequency.setValueAtTime(4200, t); f.frequency.exponentialRampToValueAtTime(600, t + 0.3);
+    env(g, t, 0.13 * e.vel, 0.004, 0.55);
+    [-7, 7].forEach(d => { const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(e.midi); o.detune.value = d; o.connect(f); o.start(t); o.stop(t + 0.7); });
+    f.connect(g); const p = panner(e.pan || 0, music); g.connect(p); g.connect(verb);
+  },
+  // a soft marimba: sine body + a quick 4th harmonic + the 10th for the wooden knock
+  mallet(t, e) {
+    const g = AC.createGain(); env(g, t, 0.2 * e.vel, 0.002, 0.5);
+    [[1, 1], [4, 0.18], [10, 0.04]].forEach(([m, a]) => { const o = AC.createOscillator(), og = AC.createGain(); o.frequency.value = mtof(e.midi) * m; og.gain.value = a;
+      if (m > 1) { og.gain.setValueAtTime(a, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.12); }
+      o.connect(og); og.connect(g); o.start(t); o.stop(t + 0.6); });
+    const p = panner(e.pan || 0, music); g.connect(p); g.connect(verb);
+  },
+  bell(t, e) {
+    const g = AC.createGain(); env(g, t, 0.16 * e.vel, 0.003, 1.1);
+    [[1, 1], [2, 0.25], [3.01, 0.1]].forEach(([m, a]) => { const o = AC.createOscillator(), og = AC.createGain(); o.frequency.value = mtof(e.midi) * m; og.gain.value = a; o.connect(og); og.connect(g); o.start(t); o.stop(t + 1.2); });
+    const p = panner(e.pan || 0, music); g.connect(p); g.connect(verb);
+  },
+  pad(t, e) {
+    const g = AC.createGain(), f = AC.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1100;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.05 * e.vel, t + 0.25); g.gain.setTargetAtTime(0.0001, t + e.dur - 0.1, 0.25);
+    e.midis.forEach(m => [-9, 0, 9].forEach(d => { const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(m - 12); o.detune.value = d; o.connect(f); o.start(t); o.stop(t + e.dur + 1.2); }));
+    f.connect(g); g.connect(music); g.connect(verb);
+  },
+  riser(t, e) {
+    const s = AC.createBufferSource(), bp = AC.createBiquadFilter(), g = AC.createGain();
+    s.buffer = noise; s.loop = true; s.start(t); s.stop(t + e.dur);
+    bp.type = 'bandpass'; bp.Q.value = 3; bp.frequency.setValueAtTime(300, t); bp.frequency.exponentialRampToValueAtTime(7000, t + e.dur);
+    g.gain.setValueAtTime(0.005, t); g.gain.exponentialRampToValueAtTime(0.16, t + e.dur - 0.05); g.gain.linearRampToValueAtTime(0, t + e.dur);
+    s.connect(bp); bp.connect(g); g.connect(drums);
+  },
+  impact(t, e) {
+    const s = AC.createBufferSource(), hp = AC.createBiquadFilter(), g = AC.createGain();
+    s.buffer = noise; s.loop = true; s.start(t); s.stop(t + 2);
+    hp.type = 'highpass'; hp.frequency.value = 2500; env(g, t, e.soft ? 0.08 : 0.22, 0.004, 1.6);
+    s.connect(hp); hp.connect(g); g.connect(drums); g.connect(verb);
+    const o = AC.createOscillator(), og = AC.createGain(); o.frequency.setValueAtTime(70, t); o.frequency.exponentialRampToValueAtTime(38, t + 1.2);
+    env(og, t, e.soft ? 0.3 : 0.6, 0.005, 1.3); o.connect(og); og.connect(drums); o.start(t); o.stop(t + 1.5);
+  },
+};
+const cutoff = t => t < W_T0 ? 16000 : t < 56 ? 500 * Math.pow(16000 / 500, Math.pow((t - W_T0) / 16, 2)) : 16000;
+  let cursor = 0;
+  function seek(t) { cursor = 0; while (cursor < EV.length && EV[cursor].t < t - 0.005) cursor++; }
+  function tick(now, startAC, keep) {
+    lp.frequency.setTargetAtTime(cutoff(now + 0.05), AC.currentTime, 0.08);
+    const horizon = now + 0.18;
+    while (cursor < EV.length && EV[cursor].t < horizon) {
+      const e = EV[cursor++]; if (e.t < now - 0.03) continue; if (keep && !keep(e)) continue;
+      try { SYN[e.kind](startAC + e.t, e); } catch (err) { /* one bad voice must not stop the song */ }
+    }
+  }
+  function resetDuck() { if (duck) { duck.gain.cancelScheduledValues(AC.currentTime); duck.gain.setValueAtTime(1, AC.currentTime); } }
+  return { SECTIONS, EV, HITS, DUR, RINGS, RING_HITS, ringEnter, W_T0, W_END, PHRASE_LEN, init: initAudio, seek, tick, resetDuck };
+})();
+
+const DUR = ORIG.DUR, NBARS = Math.round(DUR / BAR);
+
+// ---------- media = instruments for what you draw ----------
+const ROOT = [0, -4, 3, -2];                                     // the original's Am F C G, so a drawn bass follows the chords
+const chordRoot = bar => (bar >= 20 && bar < 36 ? ROOT[(bar - 20) % 4] : bar >= 12 && bar < 20 ? [0, 0, -4, -4, 3, 3, -2, -2][bar - 12] : bar >= 8 && bar < 12 ? (bar % 2 ? -4 : 0) : 0);
+const MED = {
+  ink:    { name: '浓墨', color: C.kick, note: p => (p.r < 0.4 ? { kind: 'kick' } : p.r < 0.7 ? { kind: 'clap' } : { kind: 'hat' }) },
+  pencil: { name: '铅笔', color: C.pencil, note: p => ({ kind: 'pluck', midi: ladder(57, Math.round(p.r * 9)) }) },
+  crayon: { name: '蜡笔', color: C.crayon, note: p => ({ kind: 'mallet', midi: ladder(57, Math.round(p.r * 9)) }) },
+  water:  { name: '水彩', color: C.water, note: (p, bar) => ({ kind: 'bass', midi: ladder(33, Math.round(p.r * 6)) + chordRoot(bar) }) },
+};
+let AC = null, master, verb, noise;
+function initAudio() {
+  if (AC) return;
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  const comp = AC.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 3; comp.connect(AC.destination);
+  master = AC.createGain(); master.gain.value = 0.75; master.connect(comp);
+  const len = AC.sampleRate * 2.2, ir = AC.createBuffer(2, len, AC.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3); }
+  verb = AC.createConvolver(); verb.buffer = ir; const vg = AC.createGain(); vg.gain.value = 0.28; verb.connect(vg); vg.connect(master);
+  noise = AC.createBuffer(1, AC.sampleRate, AC.sampleRate); const nd = noise.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+}
+const env = (g, t, p, a, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(p, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); };
+const pan = (p, dest) => { const n = AC.createStereoPanner(); n.pan.value = p; n.connect(dest); return n; };
+const SYN = {
+  kick(t) { const o = AC.createOscillator(), g = AC.createGain(); o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(46, t + 0.12); env(g, t, 0.85, 0.003, 0.4); o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.45); },
+  clap(t) { const s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain(); s.buffer = noise; f.type = 'bandpass'; f.frequency.value = 1700; f.Q.value = 0.9; env(g, t, 0.42, 0.003, 0.16); s.connect(f); f.connect(g); g.connect(master); g.connect(verb); s.start(t, Math.random() * 0.5); s.stop(t + 0.25); },
+  hat(t) { const s = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain(); s.buffer = noise; f.type = 'highpass'; f.frequency.value = 7500; env(g, t, 0.17, 0.002, 0.05); s.connect(f); f.connect(g); g.connect(pan(0.3, master)); s.start(t, Math.random() * 0.5); s.stop(t + 0.08); },
+  pluck(t, e) { const g = AC.createGain(), f = AC.createBiquadFilter(); f.type = 'lowpass'; f.Q.value = 2; f.frequency.setValueAtTime(4000, t); f.frequency.exponentialRampToValueAtTime(600, t + 0.3); env(g, t, 0.11, 0.004, 0.55);
+    [-7, 7].forEach(d => { const o = AC.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(e.midi); o.detune.value = d; o.connect(f); o.start(t); o.stop(t + 0.7); }); f.connect(g); g.connect(pan(-0.3, master)); g.connect(verb); },
+  mallet(t, e) { const g = AC.createGain(); env(g, t, 0.19, 0.002, 0.5);
+    [[1, 1], [4, 0.18], [10, 0.04]].forEach(([m, a]) => { const o = AC.createOscillator(), og = AC.createGain(); o.frequency.value = mtof(e.midi) * m; og.gain.value = a; if (m > 1) { og.gain.setValueAtTime(a, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.12); } o.connect(og); og.connect(g); o.start(t); o.stop(t + 0.6); });
+    g.connect(pan(0.35, master)); g.connect(verb); },
+  bass(t, e) { const o = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain(); o.type = 'sawtooth'; o.frequency.value = mtof(e.midi); f.type = 'lowpass'; f.Q.value = 4;
+    f.frequency.setValueAtTime(1300, t); f.frequency.exponentialRampToValueAtTime(220, t + 0.45); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.28, t + 0.006); g.gain.setTargetAtTime(0.0001, t + 0.3, 0.07);
+    o.connect(f); f.connect(g); g.connect(master); o.start(t); o.stop(t + 0.7); },
+};
+
+// ---------- what you put on the track: { med, n, hits: [{ step, r }], start (bar), len (bars) } ----------
+let clips = [];
+
+// ---------- transport: the song (with a count-in while 小拍 draws the first square), or edit mode (only your drawings, 16 bars) ----------
+const LEAD = 1.6 * BAR, PRE = LEAD, FREE_BARS = 16;
+let freeMode = false;
+const loopEnd = () => (freeMode ? FREE_BARS * BAR : DUR), loopStart = () => (freeMode ? 0 : -PRE), loopBars = () => Math.round(loopEnd() / BAR);
+let playing = false, startAC = 0, pausedAt = -PRE, schedTo = -PRE, timer = null;
+const now = () => (playing ? AC.currentTime - startAC : pausedAt);
+const fired = [];
+function clipEvents(c, a, b, out) {
+  for (let bar = Math.max(c.start, Math.floor(a / BAR)); bar < c.start + c.len && bar * BAR < b; bar++) {
+    const L = BAR / c.n;
+    for (let k = 0; k < c.n; k++) for (const h of c.hits) { const t = bar * BAR + k * L + h.step / STEPS * L; if (t >= a && t < b) out.push({ t, c, h }); }
+  }
+}
+function tick() {
+  let nowT = now();
+  if (nowT >= loopEnd()) { seekTo(loopStart()); nowT = now(); }   // loops; your drawings keep their places
+  if (!freeMode) ORIG.tick(nowT, startAC);
+  const horizon = Math.min(loopEnd(), nowT + 0.15), evs = [];
+  if (schedTo < nowT - 0.05 || schedTo > horizon + 1) schedTo = nowT;
+  for (const c of clips) clipEvents(c, schedTo, horizon, evs);
+  for (const e of evs) {
+    const note = MED[e.c.med].note(e.h, Math.floor(e.t / BAR));
+    try { SYN[note.kind](startAC + e.t, note); } catch (err) { /* keep the groove going */ }
+    fired.push({ t: e.t, c: e.c, h: e.h, note });
+  }
+  schedTo = horizon;
+  while (fired.length > 200) fired.shift();
+}
+function play() {
+  initAudio(); ORIG.init(AC); AC.resume();
+  startAC = AC.currentTime - pausedAt; schedTo = pausedAt; ORIG.seek(pausedAt); ORIG.resetDuck();
+  playing = true; clearInterval(timer); timer = setInterval(tick, 25); tick();
+  document.getElementById('start').hidden = true; playBtn.textContent = '❚❚';
+}
+function pause() { pausedAt = now(); playing = false; clearInterval(timer); playBtn.textContent = '▶'; }
+function seekTo(t) {
+  t = clamp(t, loopStart(), loopEnd() - 0.01); pausedAt = t; fired.length = 0;
+  if (playing) { startAC = AC.currentTime - t; schedTo = t; ORIG.seek(t); ORIG.resetDuck(); }
+}
+
+// ---------- the scene, all in one 1600×900 frame ----------
+const REC = { x: 580, y: 372, R: 300 };                            // turntable, left
+const PAD = { x: 1340, y: 342, r: 180 };                           // drawing paper, right, under the tools
+const TRK = { y0: 730, y1: 896, ruler: 752, rows: [774, 814], lane0: 842, laneH: 5.4, ph: REC.x, pps: 40 };   // the moving track; its playhead sits under the needle
+// the band of pens stands on a ruler between the record and the paper; whichever medium is needed flies over and draws with its own tip
+// H: from the pen's foot to its working end (the eraser works with its foot)
+const BUDS = [{ k: 'ink', x: 944, H: 164, name: '墨笔' }, { k: 'pencil', x: 978, H: 139, name: '铅笔' }, { k: 'crayon', x: 1013, H: 106, name: '蜡笔' },
+  { k: 'water', x: 1047, H: 138, name: '水彩笔' }, { k: 'eraser', x: 1079, H: 0, name: '橡皮' }], TRAY_Y = 702, BUD_S = 1.1;
+const BUD = Object.fromEntries(BUDS.map(b => [b.k, b]));
+const PEN = Object.fromEntries(BUDS.map(b => [b.k, { e: 0, tx: b.x, ty: TRAY_Y - 150 }]));
+
+// ---------- the drawing paper ----------
+let strokes = [], drawing = null, med = 'ink', mult = 1, ptr = null, ptrT = -1e9;
+const toStage = ev => { const b = cv.getBoundingClientRect(); return [(ev.clientX - b.left) / b.width * 1600, (ev.clientY - b.top) / b.height * 900]; };
+const inPad = ([x, y]) => Math.hypot(x - PAD.x, y - PAD.y) <= PAD.r * 1.08;
+const inTrack = ([, y]) => y >= TRK.y0;
+const budAt = ([x, y]) => (x > 922 && x < 1100 && y > 500 && y < TRAY_Y + 14 ? BUDS.reduce((a, b) => (Math.abs(b.x - x) < Math.abs(a.x - x) ? b : a)) : null);
+const pickMed = k => document.querySelector(`[data-med="${k}"]`).click();
+cv.addEventListener('pointerdown', e => {
+  const p = toStage(e);
+  if (inTrack(p)) { trackDown(p); if (dragClip) try { cv.setPointerCapture(e.pointerId); } catch (err) {} return; }
+  const b = budAt(p); if (b) { if (b.k === 'eraser') startErase(); else pickMed(b.k); return; }
+  if (!inPad(p)) return;
+  drawing = [p]; ptr = p; ptrT = performance.now(); try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+});
+cv.addEventListener('pointermove', e => {
+  const p = toStage(e);
+  if (dragClip) return trackMove(p);
+  const over = inPad(p) || drawing;
+  cv.style.cursor = over ? 'none' : inTrack(p) || budAt(p) ? 'pointer' : '';   // over the paper the pencil is the cursor
+  if (over) { ptr = p; ptrT = performance.now(); }
+  if (!drawing) return; const q = drawing[drawing.length - 1]; if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 6) drawing.push(p);
+});
+cv.addEventListener('pointerleave', () => { if (!drawing) ptrT = -1e9; });
+const endPointer = () => { dragClip = null; if (drawing) { strokes.push({ med, pts: drawing }); drawing = null; dropBtn.disabled = !snapped().length; } };
+cv.addEventListener('pointerup', endPointer); cv.addEventListener('pointercancel', endPointer);
+// snap every stroke to the 16 steps: each step keeps the mean distance of the samples that fall in it
+function snapped() {
+  const bins = Array.from({ length: STEPS }, () => []);
+  for (const s of strokes.concat(drawing ? [{ pts: drawing }] : [])) for (const [x, y] of s.pts) {
+    const dx = x - PAD.x, dy = y - PAD.y, d = Math.hypot(dx, dy); if (d > PAD.r * 1.08 || d < PAD.r * 0.08) continue;
+    const f = ((Math.atan2(dx, -dy) / TAU) % 1 + 1) % 1, step = Math.round(f * STEPS) % STEPS;
+    bins[step].push(clamp((d / PAD.r - 0.15) / 0.85, 0, 1));
+  }
+  return bins.map((b, step) => (b.length ? { step, r: b.reduce((a, c) => a + c, 0) / b.length } : null)).filter(Boolean);
+}
+
+// ---------- palette ----------
+const playBtn = document.getElementById('playBtn'), dropBtn = document.getElementById('drop'), modeBtn = document.getElementById('modeBtn');
+document.getElementById('start').addEventListener('click', play);
+playBtn.addEventListener('click', () => (playing ? pause() : play()));
+document.querySelectorAll('[data-med]').forEach(b => b.addEventListener('click', () => { med = b.dataset.med; BUD[med].poke = performance.now(); document.querySelectorAll('[data-med]').forEach(x => x.setAttribute('aria-pressed', x === b)); }));
+document.querySelectorAll('[data-n]').forEach(b => b.addEventListener('click', () => { mult = +b.dataset.n; document.querySelectorAll('[data-n]').forEach(x => x.setAttribute('aria-pressed', x === b)); }));
+document.getElementById('undo').addEventListener('click', () => strokes.pop());
+// the eraser scrubs the paper for a moment, then the strokes are gone
+let eraseAt = -1e9;
+const startErase = () => { eraseAt = performance.now(); BUD.eraser.poke = eraseAt; };
+document.getElementById('clearPad').addEventListener('click', startErase);
+modeBtn.addEventListener('click', () => {
+  freeMode = !freeMode; modeBtn.textContent = freeMode ? '原曲' : '编辑'; modeBtn.setAttribute('aria-pressed', freeMode);
+  modeBtn.title = freeMode ? '回到原曲：跟着「节奏的形状」一起画' : '编辑模式：不放原曲，只循环播放你画的（16 小节）';
+  seekTo(loopStart());
+});
+dropBtn.addEventListener('click', () => {
+  const hits = snapped(); if (!hits.length) return;
+  const t = now(); let start = playing ? Math.ceil((t + 0.05) / BAR) : Math.floor(Math.max(0, t) / BAR); if (start >= loopBars()) start = 0;
+  clips.push({ med: strokes.length ? strokes[strokes.length - 1].med : med, n: mult, hits, start, len: Math.min(8, loopBars() - start), born: performance.now() });
+  strokes = []; BUD[clips[clips.length - 1].med].poke = performance.now();
+});
+
+// ---------- drawing helpers ----------
+let boil = 1;
+const sd = k => (k * 9301 + boil * 49297) % 233280 + 1;
+const STYLE = {
+  ink:    { stroke: C.kick, strokeWidth: 4, roughness: 1.4 },
+  pencil: { stroke: C.pencil, strokeWidth: 1.7, roughness: 1.8, strokeLineDash: [9, 7] },
+  crayon: { stroke: C.crayon, strokeWidth: 3, roughness: 2.2 },
+  water:  { stroke: C.water, strokeWidth: 2.2, roughness: 2.6 },
+};
+function mark(m, x, y, k, pulse, size = 1) {
+  const s = sd(k);
+  if (m === 'ink') rc.circle(x, y, (22 + 14 * pulse) * size, { fill: C.kick, fillStyle: 'solid', stroke: C.kick, roughness: 1.6, seed: s });
+  if (m === 'pencil') { const d = (8 + 5 * pulse) * size; rc.line(x - d, y - d, x + d, y + d, { stroke: C.pencil, strokeWidth: 2.2, seed: s }); rc.line(x - d, y + d, x + d, y - d, { stroke: C.pencil, strokeWidth: 2.2, seed: s + 1 }); }
+  if (m === 'crayon') rc.circle(x, y, (20 + 12 * pulse) * size, { fill: C.crayon, fillStyle: 'hachure', hachureGap: 3.5, stroke: C.crayon, strokeWidth: 2, roughness: 2, seed: s });
+  if (m === 'water') { ctx.save(); ctx.globalAlpha *= 0.4; for (let q = 0; q < 3; q++) rc.circle(x + q * 2, y - q, (28 + 16 * pulse - q * 6) * size, { fill: C.water, fillStyle: 'solid', stroke: 'none', roughness: 3, seed: s + q }); ctx.restore(); }
+}
+function shape(m, pts, k) {
+  if (pts.length < 2) return;
+  if (m === 'crayon' && pts.length > 2) rc.polygon(pts, { fill: C.crayon, fillStyle: 'hachure', hachureGap: 11, hachureAngle: -30, fillWeight: 1.1, stroke: 'none', roughness: 2, seed: sd(k + 7) });
+  if (m === 'water' && pts.length > 2) { ctx.save(); ctx.globalAlpha *= 0.16; rc.polygon(pts, { fill: C.water, fillStyle: 'solid', stroke: 'none', roughness: 3.5, seed: sd(k + 8) }); ctx.restore(); }
+  rc.polygon(pts, Object.assign({ seed: sd(k) }, STYLE[m]));
+}
+// a chord held through the bar: a soft watercolour ring
+function washRing(cx, cy, r, k, a = 1) {
+  ctx.save(); ctx.globalAlpha *= 0.35 * a; rc.circle(cx, cy, r * 2, { stroke: C.water, strokeWidth: 10, roughness: 2.6, seed: sd(k) }); ctx.restore();
+  ctx.save(); ctx.globalAlpha *= a; rc.circle(cx, cy, r * 2, { stroke: C.water, strokeWidth: 1.6, roughness: 2.2, seed: sd(k + 1) }); ctx.restore();
+}
+function fitText(o, text, font, size, maxW, x, y) { let s = size; o.font = font(s); while (o.measureText(text).width > maxW && s > 10) o.font = font(--s); o.fillText(text, x, y); }
+
+// ---------- the desk, cached once per boil frame ----------
+const DESK = {};
+function desk() {
+  if (DESK[boil]) return ctx.drawImage(DESK[boil], 0, 0);
+  const off = document.createElement('canvas'); off.width = 1600; off.height = 900;
+  const o2 = off.getContext('2d'), r = rough.canvas(off), o = { roughness: 1.5, stroke: '#8a8174', strokeWidth: 1.5, seed: sd(500) };
+  o2.fillStyle = C.desk; o2.fillRect(0, 0, 1600, 900);
+  for (let i = 0; i < 22; i++) r.line(0, 20 + i * 34, 1600, 26 + i * 34 + (i % 3) * 4, { stroke: '#e2d5bf', strokeWidth: 1, roughness: 2.5, seed: sd(600 + i) });
+  // the title, written on the desk
+  o2.textAlign = 'left'; o2.fillStyle = C.ink2;
+  fitText(o2, '@电子音乐考古小分队', s => `${s}px "Ma Shan Zheng", KaiTi, serif`, 22, 196, 32, 50);
+  o2.fillStyle = C.ink;
+  fitText(o2, 'Canvas Record', s => `600 ${s}px Caveat, cursive`, 46, 196, 30, 96);
+  fitText(o2, 'Studio', s => `600 ${s}px Caveat, cursive`, 46, 196, 30, 138);
+  r.line(32, 148, 150, 145, { stroke: C.pal, strokeWidth: 3, roughness: 1.6, seed: sd(505) });
+  // a speaker with a little colour, and its cable
+  r.rectangle(40, 172, 160, 236, Object.assign({}, o, { fill: '#cfe0da', fillStyle: 'cross-hatch', hachureGap: 12, seed: sd(510) }));
+  r.circle(120, 250, 86, Object.assign({}, o, { fill: '#f3c09f', fillStyle: 'solid', seed: sd(520) })); r.circle(120, 250, 28, Object.assign({}, o, { fill: '#e9a07a', fillStyle: 'hachure', hachureGap: 3, seed: sd(530) }));
+  r.circle(120, 354, 52, Object.assign({}, o, { fill: '#f3c09f', fillStyle: 'hachure', hachureGap: 4, seed: sd(540) }));
+  r.curve([[200, 372], [222, 392], [228, 422], [242, 434]], { stroke: '#4b4640', strokeWidth: 3, roughness: 1, seed: sd(700) });
+  // a second speaker below
+  r.rectangle(40, 450, 160, 236, Object.assign({}, o, { fill: '#cfe0da', fillStyle: 'cross-hatch', hachureGap: 12, seed: sd(511) }));
+  r.circle(120, 528, 86, Object.assign({}, o, { fill: '#f3c09f', fillStyle: 'solid', seed: sd(521) })); r.circle(120, 528, 28, Object.assign({}, o, { fill: '#e9a07a', fillStyle: 'hachure', hachureGap: 3, seed: sd(531) }));
+  r.circle(120, 632, 52, Object.assign({}, o, { fill: '#f3c09f', fillStyle: 'hachure', hachureGap: 4, seed: sd(541) }));
+  r.curve([[200, 650], [222, 668], [228, 690], [242, 700]], { stroke: '#4b4640', strokeWidth: 3, roughness: 1, seed: sd(701) });
+  // the pens stand on a wooden ruler
+  r.rectangle(924, TRAY_Y, 174, 16, Object.assign({}, o, { fill: '#e2c48f', fillStyle: 'hachure', hachureGap: 5, seed: sd(545) }));
+  for (let i = 0; i < 17; i++) r.line(928 + i * 10, TRAY_Y, 928 + i * 10, TRAY_Y + (i % 5 ? 5 : 9), { stroke: '#8a6a3a', strokeWidth: 1, roughness: 0.6, seed: sd(546 + i) });
+  // turntable base
+  r.rectangle(240, 30, 680, 694, Object.assign({}, o, { fill: '#e3d6bf', fillStyle: 'hachure', hachureGap: 14, fillWeight: 0.8, seed: sd(550) }));
+  r.circle(268, 698, 16, Object.assign({}, o, { fill: '#d64545', fillStyle: 'solid', seed: sd(551) }));
+  r.rectangle(292, 686, 44, 24, Object.assign({}, o, { seed: sd(552) })); r.rectangle(346, 686, 44, 24, Object.assign({}, o, { seed: sd(553) }));
+  o2.font = '20px Caveat, cursive'; o2.fillStyle = C.ink2; o2.fillText('33', 303, 705); o2.fillText('45', 357, 705);
+  // the drawing paper, taped down, under the tools
+  r.rectangle(1100, 122, 480, 446, Object.assign({}, o, { fill: '#fbfaf5', fillStyle: 'solid', stroke: '#b9b0a2', seed: sd(560) }));
+  [[1115, 124, -0.4], [1565, 124, 0.4], [1115, 553, 0.4], [1565, 553, -0.4]].forEach(([x, y, a], q) => { o2.save(); o2.translate(x, y); o2.rotate(a);
+    r.rectangle(-26, -9, 52, 18, { fill: 'rgba(240,200,120,.55)', fillStyle: 'solid', stroke: 'none', roughness: 1, seed: sd(570 + q) }); o2.restore(); });
+  r.circle(PAD.x, PAD.y, PAD.r * 2, { stroke: '#9b9284', strokeWidth: 1.6, roughness: 1.2, seed: sd(580) });
+  for (const k of [0.43, 0.71]) r.circle(PAD.x, PAD.y, PAD.r * 2 * (0.15 + 0.85 * k), { stroke: C.line, strokeWidth: 1, roughness: 1.6, seed: sd(581 + k * 10) });
+  for (let s = 0; s < 16; s++) { const a = TAU * s / 16, r1 = PAD.r, r2 = PAD.r * (s % 4 ? 0.95 : 0.9);
+    r.line(PAD.x + Math.sin(a) * r1, PAD.y - Math.cos(a) * r1, PAD.x + Math.sin(a) * r2, PAD.y - Math.cos(a) * r2, { stroke: '#9b9284', strokeWidth: s % 4 ? 1 : 2, seed: sd(590 + s) }); }
+  o2.font = '20px Caveat, cursive'; o2.fillStyle = C.ink2; o2.textAlign = 'center'; o2.fillText('1', PAD.x, PAD.y - PAD.r - 6);
+  o2.font = '20px "Ma Shan Zheng", KaiTi, serif'; o2.fillText('角度是时间 · 越往外越高', PAD.x, 552);
+  // keys and a coffee
+  r.rectangle(1100, 590, 480, 112, Object.assign({}, o, { fill: '#3a3632', fillStyle: 'solid', seed: sd(600) }));
+  r.circle(1004, 120, 56, Object.assign({}, o, { fill: '#c9ddd8', fillStyle: 'hachure', hachureGap: 6, seed: sd(610) })); r.circle(1004, 120, 38, Object.assign({}, o, { fill: '#7a5a43', fillStyle: 'solid', seed: sd(611) }));
+  DESK[boil] = off; ctx.drawImage(off, 0, 0);
+}
+
+// a little face for each member of the band
+function face(x, y, s, t, k, open) {
+  const o = (q, extra) => Object.assign({ stroke: C.ink, strokeWidth: 1.6 * s, roughness: 1.2, seed: sd(k + q) }, extra);
+  if ((t + k * 0.37) % 3.1 < 0.12) { rc.line(x - 6 * s, y, x - 2 * s, y, o(1)); rc.line(x + 2 * s, y, x + 6 * s, y, o(2)); }
+  else { rc.circle(x - 4 * s, y, 4.4 * s, o(3, { fill: C.ink, fillStyle: 'solid' })); rc.circle(x + 4 * s, y, 4.4 * s, o(4, { fill: C.ink, fillStyle: 'solid' })); }
+  rc.arc(x, y + 5 * s, (7 + 4 * open) * s, (4 + 6 * open) * s, 0.15 * Math.PI, 0.85 * Math.PI, false, o(5));
+}
+
+// ---------- the band: one pen for each medium, plus the eraser ----------
+// pose = { ax, ay, th }: where the pen's working end is on the stage and how it is turned (0 = standing on its foot, tip up)
+function drawBud(b, i, t, pose, open, swing) {
+  const s = sd(1000 + i * 40), o = (k, extra) => Object.assign({ stroke: C.ink, strokeWidth: 1.5, roughness: 1.4, seed: s + k }, extra);
+  ctx.save(); ctx.translate(pose.ax, pose.ay); ctx.rotate(pose.th); ctx.scale(BUD_S, BUD_S); ctx.translate(0, b.H);
+  let fy = -60, arm = -50;
+  if (b.k === 'ink') {          // a calligraphy brush, bristles up
+    rc.polygon([[-9, 0], [9, 0], [9, -112], [-9, -112]], o(1, { fill: '#d9b77a', fillStyle: 'hachure', hachureGap: 3, hachureAngle: 80 }));
+    rc.line(-9, -40, 9, -40, o(2)); rc.line(-9, -84, 9, -84, o(3));
+    rc.polygon([[-10, -112], [10, -112], [10, -120], [-10, -120]], o(4, { fill: '#6b4b2a', fillStyle: 'solid' }));
+    rc.polygon([[-10, -120], [10, -120], [6, -146], [0, -164], [-6, -146]], o(5, { fill: C.kick, fillStyle: 'solid' }));
+    fy = -66;
+  } else if (b.k === 'pencil') {  // a blue pencil, point up
+    rc.polygon([[-9, 0], [9, 0], [9, -14], [-9, -14]], o(1, { fill: '#e88f9f', fillStyle: 'hachure', hachureGap: 2.5 }));
+    rc.polygon([[-9, -14], [9, -14], [9, -110], [-9, -110]], o(2, { fill: C.pencil, fillStyle: 'hachure', hachureGap: 3, hachureAngle: -40 }));
+    rc.polygon([[-9, -110], [9, -110], [3, -130], [-3, -130]], o(3, { fill: '#ecd2a8', fillStyle: 'hachure', hachureGap: 3 }));
+    rc.polygon([[-3, -130], [3, -130], [0, -139]], o(4, { fill: C.pencil, fillStyle: 'solid' }));
+    fy = -70;
+  } else if (b.k === 'crayon') {  // a fat red crayon in its paper wrapper
+    rc.polygon([[-13, 0], [13, 0], [13, -86], [-13, -86]], o(1, { fill: C.crayon, fillStyle: 'hachure', hachureGap: 2.6, fillWeight: 1.4 }));
+    rc.polygon([[-13.5, -12], [13.5, -12], [13.5, -66], [-13.5, -66]], o(2, { fill: '#fbf3e6', fillStyle: 'solid' }));
+    rc.line(-13, -18, 13, -18, o(3, { stroke: C.crayon })); rc.line(-13, -60, 13, -60, o(4, { stroke: C.crayon }));
+    rc.polygon([[-13, -86], [13, -86], [6, -106], [-6, -106]], o(5, { fill: C.crayon, fillStyle: 'solid' }));
+    fy = -42; arm = -36;
+  } else if (b.k === 'water') {   // a flat watercolour brush, wet at the tip
+    rc.polygon([[-7, 0], [7, 0], [7, -98], [-7, -98]], o(1, { fill: C.water, fillStyle: 'hachure', hachureGap: 3, hachureAngle: 70 }));
+    rc.polygon([[-8, -98], [8, -98], [8, -114], [-8, -114]], o(2, { fill: '#b8b2a6', fillStyle: 'cross-hatch', hachureGap: 3 }));
+    rc.polygon([[-8, -114], [8, -114], [11, -138], [-11, -138]], o(3, { fill: '#7fc8bf', fillStyle: 'solid' }));
+    ctx.save(); ctx.globalAlpha = 0.5; rc.circle(4, -146 + 6 * Math.abs(Math.sin(t * 2)), 7, o(4, { fill: C.water, fillStyle: 'solid', stroke: 'none' })); ctx.restore();
+    fy = -60;
+  } else {                        // the eraser
+    rc.polygon([[-20, 0], [20, 0], [20, -36], [-20, -36]], o(1, { fill: '#f2a7b3', fillStyle: 'hachure', hachureGap: 3 }));
+    rc.polygon([[-20.5, 0], [20.5, 0], [20.5, -11], [-20.5, -11]], o(2, { fill: C.pencil, fillStyle: 'hachure', hachureGap: 2.5 }));
+    fy = -24; arm = -20;
+  }
+  const w = b.k === 'crayon' ? 13 : b.k === 'eraser' ? 20 : 9;
+  rc.line(-w, arm, -w - 10, arm - 6 - 9 * swing, o(20, { strokeWidth: 1.6 }));
+  rc.line(w, arm, w + 10, arm - 6 + 9 * swing, o(21, { strokeWidth: 1.6 }));
+  const fp = ctx.getTransform().transformPoint(new DOMPoint(0, fy));
+  ctx.restore();
+  // the face stays upright whichever way the pen is turned
+  if (b.k !== 'crayon' && b.k !== 'eraser') { ctx.fillStyle = '#fffdf8'; ctx.beginPath(); ctx.ellipse(fp.x, fp.y + 2, 9, 11, 0, 0, TAU); ctx.fill(); }
+  face(fp.x, fp.y, BUD_S, t, 1100 + i * 9, open);
+}
+
+// ---------- the original on the record ----------
+const HITS = Object.assign({}, ORIG.HITS, { pad: ORIG.EV.filter(e => e.kind === 'pad' && e.t < ORIG.W_END).map(e => e.t) });
+const LMAP = {
+  kick: ['ink', .93, '四拍'], hat: ['pencil', .83, '反拍踩镲'], pad: ['water', .44, '铺底和弦（一圈水彩）'], clave: ['crayon', .73, 'Clave'], bass: ['water', .63, '低音'], clap: ['ink', .53, '拍手'],
+  p3: ['crayon', .73, '每小节 3 下'], p4: ['pencil', .83, '每小节 4 下'], phA: ['crayon', .83, '12/8 钟声型'], phB: ['pencil', .68, '同一句，每小节晚一格'],
+};
+const FIRST = Object.fromEntries(Object.keys(LMAP).map(id => [id, (HITS[id] || [])[0] ?? Infinity]));
+const idSeed = id => [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
+function lastIn(arr, t) { let lo = 0, hi = arr.length - 1, best = -99; while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m] <= t) { best = arr[m]; lo = m + 1; } else hi = m - 1; } return best; }
+function barFracs(id, bar) { const out = [], t0 = bar * BAR; for (const t of HITS[id] || []) { if (t >= t0 - 1e-6 && t < t0 + BAR - 1e-6) out.push((t - t0) / BAR); if (t >= t0 + BAR) break; } return out; }
+const firstFr = id => barFracs(id, Math.floor(FIRST[id] / BAR + 1e-6));
+const recPoint = (f, rr, rot) => { const a = rot - TAU * f, d = REC.R * rr; return [REC.x + Math.sin(a) * d, REC.y - Math.cos(a) * d]; };
+const ringR = n => 0.13 + 0.022 * n, ringMed = n => ['water', 'pencil', 'crayon', 'ink'][Math.floor((n - 1) / 4)];
+function drawOrig(t) {
+  const bar = Math.floor(t / BAR);
+  ctx.save(); ctx.rotate(TAU * t / BAR);
+  for (const [id, [m, rr]] of Object.entries(LMAP)) {
+    const arr = HITS[id] || [], lh = lastIn(arr, t); if (lh < 0) continue;
+    const since = t - lh; if (since > BAR * 1.6) continue;
+    const alpha = clamp(1 - (since - BAR) / (BAR * 0.6), 0, 1), grow = clamp((t - FIRST[id]) / 0.5, 0, 1), g = lerp(0.6, 1, grow);
+    if (id === 'pad') { const R0 = REC.R * rr * g, pulse = Math.exp(-since / 0.12); washRing(0, 0, R0, 777, alpha * (0.6 + 0.4 * Math.exp(-since / 0.6))); ctx.save(); ctx.globalAlpha = alpha; mark('water', 0, -R0, 790, pulse); ctx.restore(); continue; }
+    let fr = barFracs(id, bar), fb = bar; if (!fr.length) { fr = barFracs(id, bar - 1); fb = bar - 1; } if (!fr.length) continue;
+    ctx.save(); ctx.globalAlpha = alpha; ctx.scale(g, g);
+    const R0 = REC.R * rr, pts = fr.map(f => { const a = -TAU * f; return [Math.sin(a) * R0, -Math.cos(a) * R0]; });
+    if (pts.length > 1) shape(m, pts, idSeed(id));
+    fr.forEach((f, j) => { const age = t - (fb + f) * BAR; mark(m, pts[j][0], pts[j][1], idSeed(id) + j, age >= 0 ? Math.exp(-age / 0.12) : 0); });
+    ctx.restore();
+  }
+  ctx.restore();
+  if (t >= ORIG.W_T0 - 0.5 && t < ORIG.W_END + 3) {
+    const ps = ORIG.W_T0 + Math.floor((t - ORIG.W_T0) / ORIG.PHRASE_LEN) * ORIG.PHRASE_LEN, u = (t - ps) / ORIG.PHRASE_LEN;
+    const fade = t > ORIG.W_END ? clamp(1 - (t - ORIG.W_END) / 2.5, 0, 1) : 1;
+    for (let n = 1; n <= ORIG.RINGS; n++) {
+      const r = REC.R * ringR(n), m = ringMed(n), enter = clamp((t - ORIG.ringEnter(n) + 0.4) / 0.4, 0, 1) * fade;
+      if (enter <= 0) {                                            // dots that landed but haven't started yet wait at the top
+        if (t >= ORIG.W_T0 - 0.01) { ctx.save(); ctx.globalAlpha = 0.35; rc.circle(0, -r, 10, { fill: MED[m].color, fillStyle: 'solid', stroke: MED[m].color, roughness: 1.4, seed: sd(720 + n) }); ctx.restore(); }
+        continue;
+      }
+      const a = t > ORIG.W_END ? 0 : TAU * u * n, sh = t - lastIn(ORIG.RING_HITS[n], t), fl = sh >= 0 ? Math.exp(-sh / 0.15) : 0;
+      ctx.save(); ctx.globalAlpha = enter;
+      rc.circle(0, 0, r * 2, { stroke: C.line, strokeWidth: 1, roughness: 1.3, seed: sd(700 + n) });
+      rc.circle(Math.sin(a) * r, -Math.cos(a) * r, 9 + 9 * fl, { fill: MED[m].color, fillStyle: 'solid', stroke: MED[m].color, roughness: 1.4, seed: sd(720 + n) });
+      ctx.restore();
+    }
+  }
+}
+const NOTE_KINDS = new Set(['kick', 'hat', 'clap', 'clave', 'bass', 'sub', 'pluck', 'bell', 'mallet', 'pad']);
+function origColor(e) { if (e.layer && LMAP[e.layer]) return MED[LMAP[e.layer][0]].color; if (e.ring) return MED[ringMed(e.ring)].color; if (e.kind === 'bass' || e.kind === 'sub' || e.kind === 'pad') return MED.water.color; return MED.ink.color; }
+// where on the needle line a note sounds: its distance from the centre, or null if it isn't drawn on the record
+const origRadius = e => (e.layer && LMAP[e.layer] ? LMAP[e.layer][1] : e.ring ? ringR(e.ring) : e.kind === 'pad' && e.t < ORIG.W_END ? LMAP.pad[1] : null);
+function recentNotes(t, span) {
+  const out = [];
+  if (!freeMode) {
+    const E = ORIG.EV; let lo = 0, hi = E.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (E[m].t < t - span) lo = m + 1; else hi = m; }
+    for (let i = lo; i < E.length && E[i].t <= t; i++) { const e = E[i]; if (NOTE_KINDS.has(e.kind)) out.push({ t: e.t, kind: e.kind, midi: e.midi, color: origColor(e), r: origRadius(e) }); }
+  }
+  for (const f of fired) if (f.t <= t && t - f.t < span) out.push({ t: f.t, kind: f.note.kind, midi: f.note.midi, color: MED[f.c.med].color, r: lerp(0.2, 0.97, f.h.r) });
+  return out.sort((a, b) => a.t - b.t);
+}
+
+// ---------- what 小拍 draws on the paper before each layer comes in ----------
+// poly: the layer's first bar as a closed shape; ring: the held chord as a circle; whitney: 16 dots in a column that then spin, dot n turning n times, and realign
+const T_WALK = 0.5, T_DRAW = 1.0 * BAR, T_FLY = 0.4, W_LEAD = 3.2 * BAR, W_DRAW = 2.0;
+const DRAWS = Object.keys(LMAP).filter(id => FIRST[id] < Infinity).map(id => ({ id, at: FIRST[id], lead: LEAD, kind: id === 'pad' ? 'ring' : 'poly', m: LMAP[id][0], rr: LMAP[id][1], label: LMAP[id][2], fr: firstFr(id) }))
+  .concat([{ id: 'whitney', at: ORIG.W_T0, lead: W_LEAD, kind: 'whitney', m: 'pencil', label: '惠特尼', fr: [] }]).sort((a, b) => a.at - b.at);
+function nextOrigDrawing(t) {
+  if (freeMode) return null;
+  let at = Infinity;
+  for (const d of DRAWS) if (t >= d.at - d.lead && t < d.at && d.at < at) at = d.at;
+  return at < Infinity ? { at, items: DRAWS.filter(d => d.at === at) } : null;
+}
+const padPoint = (f, k = 0.78) => { const a = TAU * f, d = PAD.r * k; return [PAD.x + Math.sin(a) * d, PAD.y - Math.cos(a) * d]; };
+const RING_N = 32;
+const paperPath = d => (d.kind === 'ring' ? Array.from({ length: RING_N }, (_, j) => padPoint(j / RING_N, 0.45)) : d.fr.map(f => padPoint(f)));
+const recordPath = (d, rot) => (d.kind === 'ring' ? Array.from({ length: RING_N }, (_, j) => recPoint(j / RING_N, d.rr * 0.6, rot)) : d.fr.map(f => recPoint(f, d.rr * 0.6, rot)));
+// the pen's position along a closed polygon at progress u (0..1): the part drawn so far and the tip
+function along(V, u) {
+  const P = V.length > 2 ? V.concat([V[0]]) : V, seg = [];
+  let total = 0; for (let i = 1; i < P.length; i++) { const l = Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); seg.push(l); total += l; }
+  let left = u * total; const out = [P[0]];
+  for (let i = 1; i < P.length; i++) {
+    if (left >= seg[i - 1]) { out.push(P[i]); left -= seg[i - 1]; continue; }
+    const k = seg[i - 1] ? left / seg[i - 1] : 0; out.push([lerp(P[i - 1][0], P[i][0], k), lerp(P[i - 1][1], P[i][1], k)]); return { drawn: out, tip: out[out.length - 1], passed: i };
+  }
+  return { drawn: out, tip: P[P.length - 1], passed: V.length };
+}
+// what 小拍 is doing, written along the bottom of the paper in place of the usual caption
+function paperNote(text) { ctx.fillStyle = '#fbfaf5'; ctx.fillRect(1110, 532, 460, 30); ctx.font = '23px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink; ctx.textAlign = 'center'; ctx.fillText(text, PAD.x, 554); }
+function drawLayers(t, g) {               // returns where the pen tip is, or null
+  let tip = null, m = null;
+  const flying = t >= g.at - T_FLY, v = ease(clamp((t - (g.at - T_FLY)) / T_FLY, 0, 1)), rot = TAU * g.at / BAR;
+  const k0 = t - (g.at - LEAD) - T_WALK, share = T_DRAW / g.items.length;
+  g.items.forEach((d, q) => {
+    const V = paperPath(d), k = 330 + q * 20, onlyFirst = d.kind === 'ring';
+    if (flying) {                         // done: each corner flies to where it sits on the record at its first beat
+      const D = recordPath(d, rot), P = V.map((p, j) => [lerp(p[0], D[j][0], v), lerp(p[1], D[j][1], v)]);
+      if (d.kind === 'ring') washRing(lerp(PAD.x, REC.x, v), lerp(PAD.y, REC.y, v), lerp(PAD.r * 0.45, REC.R * d.rr * 0.6, v), k);
+      else shape(d.m, P, k);
+      (onlyFirst ? P.slice(0, 1) : P).forEach((p, j) => mark(d.m, p[0], p[1], k + 10 + j, 0.1, lerp(1, 0.7, v)));
+      return;
+    }
+    const u = clamp((k0 - q * share) / share, 0, 1);
+    if (u <= 0) { if (q === 0 && V.length) { tip = V[0]; m = d.m; } return; }
+    if (u >= 1) { if (d.kind === 'ring') washRing(PAD.x, PAD.y, PAD.r * 0.45, k); else shape(d.m, V, k); (onlyFirst ? V.slice(0, 1) : V).forEach((p, j) => mark(d.m, p[0], p[1], k + 10 + j, 0.1)); return; }
+    const a = along(V, u);
+    if (a.drawn.length > 1) rc.linearPath(a.drawn, Object.assign({ seed: sd(k) }, d.kind === 'ring' ? { stroke: C.water, strokeWidth: 6, roughness: 2.4 } : STYLE[d.m]));
+    (onlyFirst ? V.slice(0, 1) : V.slice(0, a.passed)).forEach((p, j) => mark(d.m, p[0], p[1], k + 10 + j, 0.1));
+    tip = a.tip; m = d.m; paperNote(BUD[d.m].name + '在画：' + d.label);
+  });
+  return { tip, m };
+}
+function drawWhitney(t, g) {
+  const t0 = g.at - g.lead + T_WALK, u = clamp((t - t0) / W_DRAW, 0, 1);
+  const spin0 = t0 + W_DRAW + 0.3, spinEnd = g.at - T_FLY - 0.35, s = ease(clamp((t - spin0) / (spinEnd - spin0), 0, 1));
+  const flying = t >= g.at - T_FLY, v = ease(clamp((t - (g.at - T_FLY)) / T_FLY, 0, 1));
+  const shown = flying || u >= 1 ? 16 : Math.ceil(u * 16 - 1e-6);
+  let tip = null;
+  for (let n = 1; n <= shown; n++) {
+    const d = PAD.r * (0.1 + 0.054 * n), a = TAU * n * s, col = MED[ringMed(n)].color;
+    let x = PAD.x + Math.sin(a) * d, y = PAD.y - Math.cos(a) * d;
+    if (flying) { const q = recPoint(0, ringR(n), 0); x = lerp(PAD.x, q[0], v); y = lerp(PAD.y - d, q[1], v); }
+    else if (s > 0 && s < 1) rc.circle(PAD.x, PAD.y, d * 2, { stroke: C.line, strokeWidth: 1, roughness: 1.2, seed: sd(860 + n) });
+    rc.circle(x, y, 9, { fill: col, fillStyle: 'solid', stroke: col, roughness: 1.3, seed: sd(880 + n) });
+    if (!flying && n === shown && u < 1) tip = [x, y];
+  }
+  if (flying) return null;
+  if (u < 1) paperNote('铅笔在画：16 个点，排成一竖');
+  else if (s < 0.02) paperNote('惠特尼：第 n 个点，4 小节转 n 圈');
+  else if (s < 0.97) { paperNote('里圈慢，外圈快……'); }
+  else paperNote('转完一轮，又全部对齐！');
+  if (s > 0 && s < 1) { ctx.font = '600 24px Caveat, cursive'; ctx.fillStyle = C.ink2; ctx.textAlign = 'left'; ctx.fillText('×1', PAD.x + 12, PAD.y - PAD.r * 0.154 + 6); ctx.fillText('×16', PAD.x + PAD.r * 0.97 + 4, PAD.y - PAD.r * 0.2); }
+  return tip;
+}
+
+// ---------- the track: it moves with the music, the playhead stays under the needle; a drawing appears on it only once it has been drawn ----------
+const xAt = (time, t) => TRK.ph + (time - t) * TRK.pps;
+const timeAtX = (x, t) => t + (x - TRK.ph) / TRK.pps;
+// each original layer's stretches of playing, merged across short rests, on its own thin lane under the cards
+const LANE = { kick: 0, hat: 1, pad: 2, clave: 3, bass: 4, clap: 5, p3: 6, p4: 7, phA: 6, phB: 7, whitney: 8 };
+const SPANS = {};
+for (const id of Object.keys(LMAP)) {
+  const out = []; for (const h of HITS[id] || []) { const l = out[out.length - 1]; if (l && h - l[1] <= BAR + 1e-6) l[1] = h + BAR / 8; else out.push([h, h + (id === 'pad' ? BAR : BAR / 8)]); } SPANS[id] = out;
+}
+SPANS.whitney = [[ORIG.W_T0, ORIG.W_END]];
+const CR = 18, CW = (2 * CR + 6) / TRK.pps;
+function cardBase(cx, cy, pop, stroke, k, solid) { ctx.save(); ctx.translate(cx, cy); ctx.scale(pop, pop); rc.circle(0, 0, CR * 2, { fill: '#fffdf8', fillStyle: 'solid', stroke, strokeWidth: solid ? 2.2 : 1.3, roughness: 0.9, seed: k }); }
+function card(m, pts, cx, cy, k, pop, solid) {
+  cardBase(cx, cy, pop, solid ? MED[m].color : C.ink2, k, solid);
+  const P = pts.map(p => { const a = TAU * p.f, d = CR * lerp(0.35, 0.85, p.r); return [Math.sin(a) * d, -Math.cos(a) * d]; });
+  if (P.length > 1) rc.polygon(P, { stroke: MED[m].color, strokeWidth: 1.6, roughness: 0.8, seed: k + 1, fill: P.length > 2 ? MED[m].color : undefined, fillStyle: 'hachure', hachureGap: 2.6 });
+  ctx.fillStyle = MED[m].color; P.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(x, y, 2.4, 0, TAU); ctx.fill(); });
+  ctx.restore();
+}
+function origCard(d, cx, cy, pop) {
+  if (d.kind === 'poly') return card(d.m, d.fr.map(f => ({ f, r: 0.85 })), cx, cy, sd(120 + idSeed(d.id)), pop, false);
+  cardBase(cx, cy, pop, C.ink2, sd(150 + idSeed(d.id)), false);
+  if (d.kind === 'ring') { ctx.save(); ctx.globalAlpha = 0.5; rc.circle(0, 0, CR * 1.2, { stroke: C.water, strokeWidth: 4, roughness: 1.6, seed: sd(152) }); ctx.restore(); }
+  else for (let n = 1; n <= 4; n++) rc.circle(0, -CR * (0.15 + 0.17 * n), 4.5, { fill: MED[ringMed(n * 4)].color, fillStyle: 'solid', stroke: 'none', roughness: 1, seed: sd(153 + n) });
+  ctx.restore();
+}
+// cards come in at their time; ones that land together stack up the column, then spill into the next column
+function layoutTrack(t) {
+  const items = [];
+  if (!freeMode) for (const d of DRAWS) if (t >= d.at) items.push({ d, at: d.at, user: 0 });
+  clips.forEach(c => items.push({ c, at: c.start * BAR, user: 1 }));
+  items.sort((a, b) => a.at - b.at || a.user - b.user);
+  const placed = [];
+  for (const it of items) {
+    found: for (let col = 0; col < 12; col++) for (let row = 0; row < TRK.rows.length; row++) {
+      const xt = it.at + col * CW;
+      if (placed.some(p => p.row === row && Math.abs(p.xt - xt) < CW * 0.98)) continue;
+      it.row = row; it.xt = xt; placed.push(it); break found;
+    }
+  }
+  return placed;
+}
+function drawTrack(t) {
+  const L = 14, R = 1586, bar = Math.floor(t / BAR);
+  ctx.fillStyle = '#fbf8f1'; ctx.fillRect(L - 4, TRK.y0, R - L + 8, TRK.y1 - TRK.y0);
+  rc.rectangle(L - 4, TRK.y0, R - L + 8, TRK.y1 - TRK.y0, { stroke: '#9b9284', strokeWidth: 1.6, roughness: 1.1, seed: sd(80) });
+  ctx.save(); ctx.beginPath(); ctx.rect(L, TRK.y0 + 2, R - L, TRK.y1 - TRK.y0 - 4); ctx.clip();
+  // ruler: the original's sections (or, in edit mode, bar numbers and the loop end), sliding past
+  if (!freeMode) ORIG.SECTIONS.forEach((s, i) => {
+    const x0 = xAt(s.from * BAR, t), x1 = xAt(s.to * BAR, t); if (x1 < L || x0 > R) return;
+    ctx.fillStyle = i % 2 ? '#f4eee2' : '#ece3d1'; ctx.fillRect(x0, TRK.y0 + 3, x1 - x0, TRK.ruler - TRK.y0 - 4);
+    ctx.fillStyle = i % 2 ? 'rgba(244,238,226,.35)' : 'rgba(236,227,209,.35)'; ctx.fillRect(x0, TRK.ruler, x1 - x0, TRK.y1 - TRK.ruler);
+    ctx.font = '18px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink2; ctx.textAlign = 'left'; ctx.fillText(s.name, Math.max(x0, L) + 6, TRK.y0 + 18);
+  });
+  else {
+    const x0 = xAt(0, t), x1 = xAt(loopEnd(), t);
+    ctx.fillStyle = '#efe7d7'; ctx.fillRect(x0, TRK.y0 + 3, x1 - x0, TRK.ruler - TRK.y0 - 4);
+    ctx.font = '600 18px Caveat, cursive'; ctx.fillStyle = C.ink2; ctx.textAlign = 'left';
+    for (let b = 0; b < FREE_BARS; b += 4) ctx.fillText(String(b + 1), xAt(b * BAR, t) + 5, TRK.y0 + 18);
+    rc.line(x1, TRK.y0 + 2, x1, TRK.y1 - 2, { stroke: C.ink2, strokeWidth: 2, roughness: 0.8, seed: sd(81) });
+    ctx.font = '18px "Ma Shan Zheng", KaiTi, serif'; ctx.fillText('↺ 回到开头', x1 + 6, TRK.y0 + 18);
+  }
+  ctx.strokeStyle = '#9b9284'; ctx.lineWidth = 1;
+  for (let b = 0; b <= loopBars(); b++) { const x = xAt(b * BAR, t); if (x < L || x > R) continue; ctx.beginPath(); ctx.moveTo(x, TRK.ruler - (b % 4 ? 4 : 9)); ctx.lineTo(x, TRK.ruler); ctx.stroke(); }
+  // 小拍's layers: a thin line per layer that grows while it keeps playing
+  if (!freeMode) for (const [id, spans] of Object.entries(SPANS)) {
+    const m = id === 'whitney' ? 'pencil' : LMAP[id][0], y = TRK.lane0 + LANE[id] * TRK.laneH;
+    for (const [s, e] of spans) { if (s > t) break; const x0 = xAt(s, t), x1 = xAt(Math.min(e, t), t); if (x1 < L || x0 > R) continue;
+      rc.line(x0, y, x1, y, { stroke: MED[m].color, strokeWidth: 3.2, roughness: 0.7, strokeLineDash: m === 'pencil' ? [8, 5] : undefined, seed: sd(160 + LANE[id]) }); }
+  }
+  const placed = layoutTrack(t);
+  // your drawings' tails first, so the cards sit on top
+  placed.filter(p => p.user).forEach((p, k) => {
+    const c = p.c, x0 = xAt(c.start * BAR, t), x1 = xAt((c.start + c.len) * BAR, t), cx = xAt(p.xt, t) + CR + 2, cy = TRK.rows[p.row];
+    c._g = { x0, x1, cx, cy, del: [cx + CR - 1, cy - CR + 1] };
+    if (x1 < L || x0 > R) return;
+    const live = bar >= c.start && bar < c.start + c.len;
+    rc.rectangle(x0 + 2, cy - 7, x1 - x0 - 4, 14, { fill: MED[c.med].color, fillStyle: live ? 'cross-hatch' : 'hachure', hachureGap: 5, fillWeight: 0.9, stroke: MED[c.med].color, strokeWidth: c === dragClip ? 2.6 : 1.3, roughness: 1.2, seed: sd(400 + k) });
+    rc.line(x1 - 3, cy - 12, x1 - 3, cy + 12, { stroke: C.ink, strokeWidth: 3, roughness: 0.6, seed: sd(480 + k) });
+  });
+  placed.forEach((p, k) => {
+    if (!p.user) {
+      const cx = xAt(p.xt, t) + CR + 2; if (cx < L - CR || cx > R + CR) return;
+      origCard(p.d, cx, TRK.rows[p.row], 1 + 0.6 * Math.exp(-(t - p.d.at) / 0.15));
+      return;
+    }
+    const c = p.c, g = c._g; if (g.x1 < L || g.x0 > R) return;
+    card(c.med, c.hits.map(h => ({ f: h.step / STEPS, r: h.r })), g.cx, g.cy, sd(450 + k * 3), 1 + 0.6 * Math.exp(-(performance.now() - c.born) / 150), true);
+    ctx.font = '600 20px Caveat, cursive'; ctx.textAlign = 'left'; const lx = g.cx + CR + 5, lw = ctx.measureText('×' + c.n).width;
+    ctx.fillStyle = '#fffdf8'; ctx.fillRect(lx - 3, g.cy - 10, lw + 6, 19); ctx.fillStyle = C.ink; ctx.fillText('×' + c.n, lx, g.cy + 6);
+    rc.circle(g.del[0], g.del[1], 14, { fill: '#fffdf8', fillStyle: 'solid', stroke: C.ink, strokeWidth: 1.2, roughness: 0.7, seed: sd(490 + k) });
+    ctx.font = '600 15px Caveat, cursive'; ctx.textAlign = 'center'; ctx.fillText('×', g.del[0], g.del[1] + 5);
+  });
+  ctx.restore();
+  // soft edges, then the playhead under the needle
+  const fadeL = ctx.createLinearGradient(L, 0, L + 70, 0); fadeL.addColorStop(0, 'rgba(251,248,241,1)'); fadeL.addColorStop(1, 'rgba(251,248,241,0)');
+  ctx.fillStyle = fadeL; ctx.fillRect(L, TRK.ruler, 70, TRK.y1 - TRK.ruler - 2);
+  const fadeR = ctx.createLinearGradient(R - 70, 0, R, 0); fadeR.addColorStop(0, 'rgba(251,248,241,0)'); fadeR.addColorStop(1, 'rgba(251,248,241,1)');
+  ctx.fillStyle = fadeR; ctx.fillRect(R - 70, TRK.ruler, 70, TRK.y1 - TRK.ruler - 2);
+  rc.line(TRK.ph, TRK.y0 + 2, TRK.ph, TRK.y1 - 2, { stroke: C.crayon, strokeWidth: 2.6, roughness: 0.8, strokeLineDash: [10, 7], seed: sd(60) });
+  rc.polygon([[TRK.ph - 9, TRK.y0 + 2], [TRK.ph + 9, TRK.y0 + 2], [TRK.ph, TRK.y0 + 15]], { fill: C.crayon, fillStyle: 'solid', stroke: C.crayon, roughness: 0.6, seed: sd(61) });
+}
+// editing on the track: drag a drawing to move it, its handle to stretch it, × to drop it; anywhere else seeks
+let dragClip = null, dragMode = null, grab = 0;
+function trackDown([x, y]) {
+  const t = now();
+  for (let k = clips.length - 1; k >= 0; k--) {
+    const c = clips[k], g = c._g; if (!g) continue;
+    if (Math.hypot(x - g.del[0], y - g.del[1]) < 12) { clips.splice(k, 1); return; }
+    const onHandle = Math.abs(x - g.x1) < 12 && Math.abs(y - g.cy) < 16 && x > g.cx + CR - 4;
+    const onBody = (Math.hypot(x - g.cx, y - g.cy) < CR + 4) || (x >= g.x0 && x <= g.x1 && Math.abs(y - g.cy) < 10);
+    if (!onHandle && !onBody) continue;
+    dragClip = c; dragMode = onHandle ? 'len' : 'move'; grab = timeAtX(x, t) / BAR - c.start; return;
+  }
+  seekTo(timeAtX(x, t));
+}
+function trackMove([x]) {
+  const b = timeAtX(x, now()) / BAR;                                // the strip may be sliding under the pointer; work in bars
+  if (dragMode === 'len') dragClip.len = clamp(Math.round(b) - dragClip.start, 1, loopBars() - dragClip.start);
+  else dragClip.start = clamp(Math.round(b - grab), 0, loopBars() - dragClip.len);
+}
+
+// ---------- one frame ----------
+let lastFrame = performance.now();
+function frame() {
+  requestAnimationFrame(frame);
+  if (!rc) return;
+  const t = clamp(now(), loopStart(), loopEnd()), bar = Math.floor(t / BAR);
+  boil = playing ? Math.floor((t + 10) * 6) % 3 + 1 : Math.floor(performance.now() / 170) % 3 + 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  desk();
+
+  // the record
+  ctx.save(); ctx.translate(REC.x, REC.y);
+  rc.circle(0, 0, REC.R * 2.06, { fill: '#2b2b2b', fillStyle: 'solid', stroke: C.ink, roughness: 1, seed: sd(1) });
+  rc.circle(0, 0, REC.R * 2, { fill: '#fbfaf5', fillStyle: 'solid', stroke: C.ink, strokeWidth: 1.5, roughness: 1.2, seed: sd(2) });
+  [.93, .83, .73, .63, .53].forEach((r, i) => rc.circle(0, 0, REC.R * r * 2, { stroke: C.line, strokeWidth: 1, roughness: 1.6, seed: sd(3 + i) }));
+  ctx.save(); ctx.rotate(TAU * t / BAR);
+  const TK = !freeMode && bar >= 12 && bar < 20 ? 12 : 16;         // the 12/8 section counts in twelves
+  for (let s = 0; s < TK; s++) { const beat = TK === 12 ? s % 3 === 0 : s % 4 === 0, a = -TAU * s / TK, r1 = REC.R * 0.99, r2 = REC.R * (beat ? 0.94 : 0.965);
+    rc.line(Math.sin(a) * r1, -Math.cos(a) * r1, Math.sin(a) * r2, -Math.cos(a) * r2, { stroke: '#9b9284', strokeWidth: beat ? 2 : 1, seed: sd(20 + s) }); }
+  ctx.restore();
+  if (!freeMode) drawOrig(t);
+  // your drawings that are on now ride the record at their own ×n
+  clips.forEach((c, i) => {
+    if (bar < c.start || bar >= c.start + c.len || c.start >= loopBars()) return;
+    const grow = clamp((t - c.start * BAR) / 0.4, 0, 1);
+    ctx.save(); ctx.rotate(TAU * c.n * t / BAR); ctx.globalAlpha = grow; const g = lerp(0.6, 1, grow); ctx.scale(g, g);
+    const pts = c.hits.map(h => { const a = -TAU * h.step / STEPS, rr = REC.R * lerp(0.2, 0.97, h.r); return [Math.sin(a) * rr, -Math.cos(a) * rr]; });
+    if (pts.length > 1) shape(c.med, pts, 900 + i * 13);
+    c.hits.forEach((h, j) => { const ph = ((c.n * t / BAR - h.step / STEPS) % 1 + 1) % 1; mark(c.med, pts[j][0], pts[j][1], 950 + i * 13 + j, Math.exp(-ph * BAR / c.n / 0.12)); });
+    ctx.restore();
+  });
+  rc.circle(0, 0, 60, { fill: C.pal, fillStyle: 'hachure', hachureGap: 5, stroke: C.ink, roughness: 1.2, seed: sd(9) });
+  ctx.fillStyle = C.ink; ctx.beginPath(); ctx.arc(0, 0, 5, 0, TAU); ctx.fill();
+  ctx.restore();
+
+  // the red line under the needle: whatever crosses it sounds, and each sound splashes right where it crossed
+  const recent = recentNotes(t, 1.2);
+  const last = recent.length ? recent[recent.length - 1] : null, hitAge = last ? t - last.t : 9;
+  const flash = Math.exp(-hitAge / 0.12);
+  rc.line(REC.x, REC.y - 36, REC.x, REC.y - REC.R, { stroke: C.crayon, strokeWidth: 2.4 + 2.5 * flash, roughness: 1.2, strokeLineDash: [12, 9], seed: sd(40) });
+  for (const f of recent) {
+    const age = t - f.t; if (f.r == null || age > 0.45) continue;
+    const u = age / 0.45, y = REC.y - REC.R * f.r, k = 800 + Math.round(f.r * 300);
+    ctx.save(); ctx.globalAlpha = 1 - u;
+    rc.circle(REC.x, y, 16 + 54 * u, { stroke: f.color, strokeWidth: 3.2 - 2 * u, roughness: 1.3, seed: sd(k) });
+    for (let q = 0; q < 6; q++) { const a = q * TAU / 6 + 0.3, r0 = 10 + 30 * u, r1 = r0 + 10; rc.line(REC.x + Math.cos(a) * r0, y + Math.sin(a) * r0, REC.x + Math.cos(a) * r1, y + Math.sin(a) * r1, { stroke: f.color, strokeWidth: 2, roughness: 0.8, seed: sd(k + q) }); }
+    ctx.restore();
+  }
+  ctx.save(); ctx.font = '24px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.crayon; ctx.textAlign = 'right'; ctx.fillText('过线就响', REC.x - 14, REC.y - REC.R * 0.7); ctx.restore();
+
+  // tonearm
+  rc.circle(870, 92, 64, { fill: '#cbc3b5', fillStyle: 'solid', stroke: C.ink, roughness: 1.2, seed: sd(30) });
+  rc.linearPath([[870, 92], [690, 76], [598, 88]], { stroke: C.ink, strokeWidth: 6, roughness: 0.8, seed: sd(31) });
+  rc.rectangle(566, 76, 30, 24, { fill: C.ink, fillStyle: 'solid', stroke: C.ink, roughness: 1, seed: sd(32) });
+
+  // the speaker breathes with the kick; keys light with each pitch
+  let kickAge = 9; for (let i = recent.length - 1; i >= 0; i--) if (recent[i].kind === 'kick') { kickAge = t - recent[i].t; break; }
+  const boom = Math.exp(-kickAge / 0.1);
+  for (const y of [250, 528]) rc.circle(120, y, 60 + 18 * boom, { stroke: C.ink, strokeWidth: 2, roughness: 1.4, seed: sd(42 + y) });
+  const WHITE = [57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 79, 81], kw = 468 / 15;
+  WHITE.forEach((m, i) => {
+    let lit = 0, col = null;
+    for (const f of recent) { if (f.midi == null) continue; let mm = f.midi; while (mm < 57) mm += 12; while (mm > 81) mm -= 12; if (mm === m) { const v = Math.exp(-(t - f.t) / 0.25); if (v > lit) { lit = v; col = f.color; } } }
+    rc.rectangle(1106 + i * kw, 598, kw - 4, 96, { fill: lit > 0.05 ? col : '#fbfaf5', fillStyle: lit > 0.05 ? 'hachure' : 'solid', hachureGap: 4, stroke: C.ink, strokeWidth: 1.2, roughness: 1, seed: sd(50 + i) });
+  });
+
+  // the paper: your strokes, or 小拍 drawing the original's next layer when the paper is empty
+  const all = strokes.concat(drawing ? [{ med, pts: drawing }] : []);
+  const userPen = !!drawing || performance.now() - ptrT < 1500;
+  const nd = all.length || userPen ? null : nextOrigDrawing(t);
+  let penAt = null, penMed = null;
+  if (nd && nd.items[0].kind === 'whitney') { penAt = drawWhitney(t, nd.items[0]); penMed = 'pencil'; }
+  else if (nd) ({ tip: penAt, m: penMed } = drawLayers(t, nd));
+  const er = (performance.now() - eraseAt) / 800;
+  if (er >= 1 && eraseAt > 0) { strokes = []; eraseAt = -1e9; }
+  ctx.save(); if (er >= 0 && er < 1) ctx.globalAlpha = 1 - ease(er);
+  for (const [q, s] of all.entries()) if (s.pts.length > 1) rc.linearPath(s.pts, Object.assign({ seed: sd(300 + q) }, STYLE[s.med]));
+  else if (s.pts.length === 1) mark(s.med, s.pts[0][0], s.pts[0][1], 300 + q, 0);
+  ctx.restore();
+  const snaps = snapped(), m0 = all.length ? all[all.length - 1].med : med;
+  snaps.forEach(h => { const a = TAU * h.step / STEPS, d = PAD.r * (0.15 + 0.85 * h.r); mark(m0, PAD.x + Math.sin(a) * d, PAD.y - Math.cos(a) * d, 400 + h.step, 0.2); });
+  if (!nd) { ctx.font = '600 34px Caveat, cursive'; ctx.fillStyle = MED[m0].color; ctx.textAlign = 'left'; ctx.fillText('×' + mult, 1118, 164);
+    ctx.font = '20px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink2; ctx.fillText(snaps.length ? `${MED[m0].name} · ${snaps.length} 个拍位` : `${MED[m0].name} · 在圆里画`, 1158, 162); }
+  dropBtn.disabled = !snaps.length;
+
+  const sec = ORIG.SECTIONS.find(x => bar >= x.from && bar < x.to) || ORIG.SECTIONS[ORIG.SECTIONS.length - 1];
+  ctx.font = '32px "Ma Shan Zheng", KaiTi, serif'; ctx.fillStyle = C.ink; ctx.textAlign = 'left'; ctx.fillText(freeMode ? '编辑模式' : t < 0 ? '准备……' : sec.name, 408, 710);
+  const tt = Math.max(0, t), mm = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  ctx.font = '600 28px Caveat, cursive'; ctx.fillStyle = C.ink2; ctx.textAlign = 'right'; ctx.fillText(`${mm(tt)} / ${mm(loopEnd())}`, 904, 710);
+
+  drawTrack(t);
+
+  // the band: every pen hops on each beat, landing on the ruler on the beat, alternately left and right, higher when its own instrument plays;
+  // the pen whose medium is needed flies over and draws with its tip (your pen follows your hand; the eraser scrubs when you clear)
+  const pn = performance.now(), dt = Math.min(0.1, (pn - lastFrame) / 1000); lastFrame = pn;
+  const beat = BAR / 4, bt = playing ? t + 10 : pn / 1000, ph = ((bt / beat) % 1 + 1) % 1, side = Math.floor(bt / beat) % 2 ? -1 : 1;
+  let active = null, aim = null, press = 0;
+  if (er >= 0 && er < 1) { active = 'eraser'; aim = [PAD.x + 110 * Math.sin(er * TAU * 2.5), PAD.y + 50 * Math.sin(er * TAU * 1.3)]; press = 1; }
+  else if (userPen && ptr) { active = med; aim = ptr; press = drawing ? 1 : 0; }
+  else if (penAt) { active = penMed; aim = penAt; press = 0.85; }
+  const poses = BUDS.map((b, i) => {
+    const P = PEN[b.k], goal = b.k === active ? 1 : 0;
+    P.e = clamp(P.e + Math.sign(goal - P.e) * dt / 0.45, 0, 1);
+    if (goal) { P.tx = aim[0]; P.ty = aim[1]; }
+    let age = 9;
+    if (b.k !== 'eraser') for (let q = recent.length - 1; q >= 0; q--) if (recent[q].color === MED[b.k].color) { age = t - recent[q].t; break; }
+    const poke = Math.exp(-(pn - (b.poke || -1e9)) / 250), mine = Math.exp(-age / 0.25);
+    const hop = ((playing ? 16 + 18 * mine : 0) + 24 * poke) * Math.sin(Math.PI * ph);
+    const dx = playing ? 7 * lerp(side, -side, ease(ph)) : 0;
+    const thS = playing ? -0.16 * side * Math.sin(Math.PI * ph) : 0.04 * Math.sin(pn / 600 + i);
+    const H = b.H * BUD_S, bx = b.x + dx, by = TRAY_Y - hop;
+    const S = { ax: bx + H * Math.sin(thS), ay: by - H * Math.cos(thS), th: thS };
+    const D = { ax: P.tx, ay: P.ty - 12 * (1 - (goal ? press : 0)), th: b.k === 'eraser' ? 0.22 * Math.sin(pn / 45) : Math.PI - 0.45 };
+    const e = ease(P.e);
+    return { b, i, e, open: clamp(mine + poke, 0, 1), swing: playing ? side * (1 - 2 * ph) : 0,
+      pose: { ax: lerp(S.ax, D.ax, e), ay: lerp(S.ay, D.ay, e) - Math.sin(Math.PI * e) * 110, th: lerp(S.th, D.th, e) } };
+  });
+  const sel = poses.find(p => p.b.k === med);
+  if (sel && sel.e < 0.5) rc.ellipse(sel.b.x, TRAY_Y + 1, 40, 10, { fill: C.pal, fillStyle: 'hachure', hachureGap: 2.5, stroke: 'none', roughness: 1.4, seed: sd(1030) });
+  poses.sort((a, c) => a.e - c.e).forEach(p => {
+    if (p.e > 0.5) { ctx.save(); ctx.globalAlpha = 0.25 * p.e; ctx.fillStyle = C.ink; ctx.beginPath(); ctx.ellipse(PEN[p.b.k].tx + 6, PEN[p.b.k].ty + 3, 11, 4, 0, 0, TAU); ctx.fill(); ctx.restore(); }
+    drawBud(p.b, p.i, bt, p.pose, p.open, p.swing);
+  });
+  ctx.save(); ctx.font = '600 32px Caveat, cursive'; ctx.textAlign = 'center';
+  recent.slice(-8).forEach((f, q) => { const u = (t - f.t) / 1.2; ctx.globalAlpha = 1 - u; ctx.fillStyle = f.color; ctx.fillText(q % 3 ? '♪' : '♫', 680 + Math.sin(f.t * 7) * 40 + 30 * u, 70 - 50 * u); });
+  ctx.restore();
+}
+
+requestAnimationFrame(frame);
+})();
+</script>
