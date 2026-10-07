@@ -38,6 +38,7 @@ body { background: var(--paper); color: var(--ink); font-family: "Noto Sans SC",
 @keyframes nudge { 0%, 70%, 100% { transform: rotate(0); } 76% { transform: rotate(-4deg) scale(1.06); } 84% { transform: rotate(3deg) scale(1.06); } 92% { transform: rotate(0) scale(1.03); } }
 @media (prefers-reduced-motion: reduce) { .pb.free { animation: none; } }
 .pb.lang { font-family: Caveat, var(--f-hand); font-weight: 600; }
+#nl-badge-frame { display: none !important; }   /* hide the hosting badge Netlify injects */
 html[lang="en"] .palette { font-size: 1.08cqw; }   /* English labels are longer; a smaller size keeps the tools on two rows */
 html[lang="en"] .pb { font-family: Caveat, var(--f-hand); font-weight: 600; }
 .pb:disabled { opacity: .4; cursor: not-allowed; }
